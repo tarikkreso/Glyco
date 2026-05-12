@@ -1,0 +1,199 @@
+import sys
+import unittest
+from datetime import date
+from pathlib import Path
+
+from fastapi.testclient import TestClient
+
+sys.path.append(str(Path(__file__).resolve().parents[1]))
+
+from app.db.database import SessionLocal
+from app.db import models
+from app.main import app
+from app.ml.inference import _load_risk_bundle, _load_trend_bundle, predict_monitoring
+from app.rules.engine import calculate_bmi
+
+
+class GlycoApiTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.client = TestClient(app)
+
+    def test_model_artifacts_load(self) -> None:
+        risk = _load_risk_bundle()
+        trend = _load_trend_bundle()
+        self.assertIn("features", risk["preprocessor"])
+        self.assertIn("features", trend["preprocessor"])
+        self.assertEqual(risk["metadata"]["model_version"], "random-forest-0.1")
+        self.assertEqual(trend["metadata"]["model_version"], "trend-random-forest-0.1")
+
+    def test_seeded_demo_users_cover_high_and_low_risk(self) -> None:
+        monitoring_user = self.client.get("/api/risk-assessment/1/latest").json()
+        high_user = self.client.get("/api/risk-assessment/2/latest").json()
+        low_user = self.client.get("/api/risk-assessment/3/latest").json()
+        self.assertEqual(monitoring_user["model_version"], "random-forest-0.1")
+        self.assertEqual(monitoring_user["risk_level"], "high")
+        self.assertEqual(high_user["risk_level"], "high")
+        self.assertEqual(low_user["risk_level"], "low")
+
+    def test_seeded_monitoring_user_is_model_backed(self) -> None:
+        monitoring = self.client.get("/api/monitoring-assessment/1/latest").json()
+        self.assertEqual(monitoring["model_version"], "trend-random-forest-0.1")
+        self.assertIn(monitoring["trend_label"], {"watch", "concerning"})
+
+    def test_insufficient_history_falls_back_cleanly(self) -> None:
+        db = SessionLocal()
+        user = None
+        try:
+            user = models.User(full_name="Fallback Check", email_or_demo_id="demo-fallback-check")
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+            profile = models.Profile(
+                user_id=user.id,
+                age=44,
+                sex="Female",
+                height_cm=165,
+                weight_kg=71,
+                bmi=calculate_bmi(71, 165),
+                high_bp=False,
+                high_chol=False,
+                smoker=False,
+                phys_activity=True,
+                fruits=True,
+                veggies=True,
+                general_health=2,
+                stroke_history=False,
+                heart_disease_history=False,
+                difficulty_walking=False,
+                family_history_diabetes=False,
+                fasting_glucose_optional=96,
+                hba1c_optional=5.4,
+            )
+            db.add(profile)
+            db.add(
+                models.HealthLog(
+                    user_id=user.id,
+                    log_date=date.today(),
+                    fasting_glucose=102,
+                    post_meal_glucose=138,
+                    systolic_bp=122,
+                    diastolic_bp=78,
+                    activity_minutes=22,
+                )
+            )
+            db.commit()
+            direct = predict_monitoring(
+                db.query(models.HealthLog)
+                .filter(models.HealthLog.user_id == user.id)
+                .order_by(models.HealthLog.log_date.asc())
+                .all()
+            )
+            self.assertFalse(direct["ok"])
+            payload = self.client.get(f"/api/monitoring-assessment/{user.id}/latest").json()
+            self.assertEqual(payload["model_version"], "engineered-rules-0.1")
+            self.assertIn("message", payload["summary"])
+        finally:
+            if user is not None:
+                db.query(models.HealthLog).filter(models.HealthLog.user_id == user.id).delete()
+                db.query(models.Profile).filter(models.Profile.user_id == user.id).delete()
+                db.query(models.User).filter(models.User.id == user.id).delete()
+                db.commit()
+            db.close()
+
+    def test_report_generation_uses_model_backed_language(self) -> None:
+        report = self.client.post("/api/reports/doctor?user_id=1").json()
+        bodies = [section["body"] for section in report["content"]["sections"]]
+        self.assertTrue(any("random-forest-0.1" in body for body in bodies))
+        self.assertTrue(any("trend-random-forest-0.1" in body or "concerning" in body for body in bodies))
+
+    def test_glyco_insight_contains_agent_sections(self) -> None:
+        insight = self.client.get("/api/insights/1").json()
+        self.assertIn("what_changed", insight)
+        self.assertIn("why_it_matters", insight)
+        self.assertIn("what_to_do_next", insight)
+        self.assertIn("what_to_ask_your_doctor", insight)
+        self.assertIn("tool_calls", insight)
+        self.assertGreaterEqual(len(insight["what_to_do_next"]), 1)
+        self.assertGreaterEqual(len(insight["what_to_ask_your_doctor"]), 1)
+
+    def test_agent_chat_uses_patient_tools_without_llm(self) -> None:
+        response = self.client.post("/api/agent/chat", json={"user_id": 1, "message": "Trebam li se brinuti ovaj tjedan?"}).json()
+        self.assertIn("answer", response)
+        self.assertEqual(response["llm_mode"], "fallback")
+        tool_names = {tool["name"] for tool in response["tool_calls"]}
+        self.assertTrue({"get_logs", "run_risk_check", "run_trend_check", "retrieve_guidelines", "read_agent_memory"}.issubset(tool_names))
+        self.assertGreaterEqual(len(response["guideline_snippets"]), 1)
+        self.assertIn("learning_summary", response)
+        self.assertIn("does not diagnose", response["safety_note"])
+
+    def test_agent_feedback_personalizes_next_answer(self) -> None:
+        db = SessionLocal()
+        user = None
+        try:
+            user = models.User(full_name="Memory Check", email_or_demo_id="demo-memory-check")
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+            profile = models.Profile(
+                user_id=user.id,
+                age=58,
+                sex="Female",
+                height_cm=166,
+                weight_kg=88,
+                bmi=calculate_bmi(88, 166),
+                high_bp=True,
+                high_chol=True,
+                smoker=False,
+                phys_activity=True,
+                fruits=True,
+                veggies=True,
+                general_health=3,
+                stroke_history=False,
+                heart_disease_history=False,
+                difficulty_walking=False,
+                family_history_diabetes=True,
+                fasting_glucose_optional=122,
+                hba1c_optional=6.1,
+            )
+            db.add(profile)
+            db.commit()
+            self.client.post(
+                "/api/agent/feedback",
+                json={
+                    "user_id": user.id,
+                    "message": "This was useful",
+                    "helpful": True,
+                    "preferred_tone": "concise",
+                    "confirmed_action": "Walk after the largest meal.",
+                },
+            )
+            response = self.client.post("/api/agent/chat", json={"user_id": user.id, "message": "Should I be worried this week?"}).json()
+            self.assertEqual(response["learning_summary"]["feedback_count"], 1)
+            self.assertEqual(response["learning_summary"]["preferred_tone"], "concise")
+            self.assertIn("Walk after the largest meal.", response["answer"])
+        finally:
+            if user is not None:
+                db.query(models.AgentFeedback).filter(models.AgentFeedback.user_id == user.id).delete()
+                db.query(models.RiskAssessment).filter(models.RiskAssessment.user_id == user.id).delete()
+                db.query(models.MonitoringAssessment).filter(models.MonitoringAssessment.user_id == user.id).delete()
+                db.query(models.HealthLog).filter(models.HealthLog.user_id == user.id).delete()
+                db.query(models.Profile).filter(models.Profile.user_id == user.id).delete()
+                db.query(models.User).filter(models.User.id == user.id).delete()
+                db.commit()
+            db.close()
+
+    def test_agent_chat_urgent_symptom_safety(self) -> None:
+        response = self.client.post("/api/agent/chat", json={"user_id": 1, "message": "I have chest pain and shortness of breath"}).json()
+        self.assertIn("urgent medical attention", response["answer"])
+        self.assertGreaterEqual(len(response["tool_calls"]), 1)
+
+    def test_proactive_alert_endpoint_returns_alert_for_seeded_user(self) -> None:
+        result = self.client.post("/api/agent/proactive-check/1").json()
+        self.assertIn(result["reason"] if not result["created"] else result["title"], {"existing", "Concerning trend detected", "Watch pattern detected"})
+        alerts = self.client.get("/api/alerts/1").json()
+        self.assertGreaterEqual(len(alerts), 1)
+
+
+if __name__ == "__main__":
+    unittest.main()
