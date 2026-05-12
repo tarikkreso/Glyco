@@ -1,0 +1,87 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+env/
+venv/
+.venv/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+
+# Test / coverage
+.tox/
+.nox/
+.coverage
+.coverage.*
+.pytest_cache/
+
+# Mypy / caches
+.mypy_cache/
+.pyre/
+
+# Jupyter
+.ipynb_checkpoints
+
+# VS Code
+.vscode/
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Frontend builds
+dist/
+build/
+
+# Data and large artifacts
+data/
+ml/artifacts/
+
+# Database files
+*.sqlite3
+*.db
+
+# Model artifacts
+*.joblib
+
+# Environment / secrets
+.env
+.env.local
+.env.*.local
+secrets/
+*.pem
+*.key
+
+# Logs
+logs/
+*.log
+
+# IDEs
+.idea/
+
+# Temp
+tmp/
+temp/
+node_modules/
+dist/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+backend/glyco.db
+ml/artifacts/*.joblib
+ml/artifacts/*.json
+data/processed/*.json
