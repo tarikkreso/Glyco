@@ -169,13 +169,19 @@ def get_reports(user_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/reports/{report_id}/pdf")
-def report_pdf(report_id: int, db: Session = Depends(get_db)):
+def report_pdf(report_id: int, inline: bool = False, db: Session = Depends(get_db)):
     """Generate and return a PDF export for a report."""
     try:
         path = generate_pdf_report(db, report_id)
     except ValueError:
         raise HTTPException(404, "Report not found")
-    return FileResponse(path, media_type="application/pdf", filename=f"glyco_report_{report_id}.pdf")
+    disposition = "inline" if inline else "attachment"
+    return FileResponse(
+        path,
+        media_type="application/pdf",
+        filename=f"glyco_report_{report_id}.pdf",
+        content_disposition_type=disposition,
+    )
 
 
 @router.get("/insights/{user_id}")

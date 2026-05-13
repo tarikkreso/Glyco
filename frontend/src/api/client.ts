@@ -146,7 +146,7 @@ export const api = {
   assessMonitoring: (userId = 1) => request<MonitoringAssessment>(`/monitoring-assessment?user_id=${userId}`, { method: "POST" }),
   report: (type: string, userId = 1) => request<ReportDocument>(`/reports/${type}?user_id=${userId}`, { method: "POST" }),
   reports: (userId = 1) => request<ReportDocument[]>(`/reports/${userId}`),
-  reportPdfUrl: (reportId: number) => `${API_BASE}/reports/${reportId}/pdf`,
+  reportPdfUrl: (reportId: number, inline = false) => `${API_BASE}/reports/${reportId}/pdf${inline ? "?inline=1" : ""}`,
   insight: (userId = 1) => request<GlycoInsight>(`/agent/insight/${userId}`),
   agentChat: (message: string, userId = 1) => request<AgentChatResponse>("/agent/chat", { method: "POST", body: JSON.stringify({ user_id: userId, message }) }),
   agentFeedback: (payload: { user_id?: number; message: string; helpful: boolean; preferred_tone: string; confirmed_action?: string; notes?: string }) => request<AgentFeedback>("/agent/feedback", { method: "POST", body: JSON.stringify({ user_id: 1, ...payload }) }),

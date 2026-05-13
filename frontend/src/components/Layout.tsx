@@ -1,5 +1,7 @@
 import { Activity, BarChart3, ClipboardList, FileText, HeartPulse, Home, Menu, MessageSquareText, Share2, Utensils } from "lucide-react";
 import { NavLink, Outlet } from "react-router-dom";
+import { GlobalLogNewData } from "./GlobalLogNewData";
+import { ToastProvider } from "./ui";
 
 const nav = [
   { to: "/overview", label: "Overview", icon: Home },
@@ -13,40 +15,42 @@ const nav = [
 
 export function Layout() {
   return (
-    <div className="shell">
-      <aside className="sidebar">
-        <div className="brand-mark">
-          <div className="seal"><BarChart3 size={18} /></div>
-          <div>
-            <strong>Glyco</strong>
-            <span>Clinical Center</span>
+    <ToastProvider>
+      <div className="shell">
+        <aside className="sidebar">
+          <div className="brand-mark">
+            <div className="seal"><BarChart3 size={18} /></div>
+            <div>
+              <strong>Glyco</strong>
+              <span>Clinical Center</span>
+            </div>
           </div>
-        </div>
-        <nav>
-          {nav.map((item) => {
-            const Icon = item.icon;
-            return <NavLink to={item.to} key={item.to}><Icon size={19} />{item.label}</NavLink>;
+          <nav>
+            {nav.map((item) => {
+              const Icon = item.icon;
+              return <NavLink to={item.to} key={item.to}><Icon size={19} />{item.label}</NavLink>;
+            })}
+          </nav>
+          <div className="sidebar-footer">
+            <span>Help Center</span>
+            <span>Logout</span>
+          </div>
+        </aside>
+        <main>
+          <header className="topbar">
+            <div className="mobile-brand"><Menu size={18} /> Glyco</div>
+            <div className="avatar">SK</div>
+          </header>
+          <Outlet />
+          <GlobalLogNewData />
+        </main>
+        <nav className="bottom-nav">
+          {nav.slice(0, 5).map((item) => {
+            const Icon = item.icon === ClipboardList ? Utensils : item.icon;
+            return <NavLink to={item.to} key={item.to}><Icon size={17} /><span>{item.label.split(" ")[0]}</span></NavLink>;
           })}
         </nav>
-        <div className="sidebar-footer">
-          <span>Help Center</span>
-          <span>Logout</span>
-        </div>
-      </aside>
-      <main>
-        <header className="topbar">
-          <div className="mobile-brand"><Menu size={18} /> Glyco</div>
-          <input aria-label="Search" placeholder="Search..." />
-          <div className="avatar">SK</div>
-        </header>
-        <Outlet />
-      </main>
-      <nav className="bottom-nav">
-        {nav.slice(0, 5).map((item) => {
-          const Icon = item.icon === ClipboardList ? Utensils : item.icon;
-          return <NavLink to={item.to} key={item.to}><Icon size={17} /><span>{item.label.split(" ")[0]}</span></NavLink>;
-        })}
-      </nav>
-    </div>
+      </div>
+    </ToastProvider>
   );
 }

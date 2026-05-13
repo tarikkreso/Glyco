@@ -1,19 +1,16 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
-import { useForm } from "react-hook-form";
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { api } from "../api/client";
 import { GlycoInsightPanel } from "../components/GlycoInsightPanel";
+import { LogNewDataForm } from "../components/LogNewDataForm";
 import { Badge, Card, EmptyState, ErrorState, LoadingState, PageHeader, StatCard } from "../components/ui";
 
 export function Monitoring() {
-  const queryClient = useQueryClient();
   const logs = useQuery({ queryKey: ["logs"], queryFn: () => api.logs() });
   const monitoring = useQuery({ queryKey: ["monitoring"], queryFn: () => api.latestMonitoring() });
   const insight = useQuery({ queryKey: ["insight"], queryFn: () => api.insight() });
   const alerts = useQuery({ queryKey: ["alerts"], queryFn: () => api.alerts() });
-  const { register, handleSubmit, reset } = useForm({ defaultValues: { log_date: new Date().toISOString().slice(0, 10), fasting_glucose: 128, post_meal_glucose: 164, systolic_bp: 136, diastolic_bp: 86, activity_minutes: 25, notes: "" } });
-  const addLog = useMutation({ mutationFn: (values: Record<string, unknown>) => api.addLog({ user_id: 1, ...values }), onSuccess: async () => { await api.assessMonitoring(); queryClient.invalidateQueries(); reset(); } });
   return (
     <div className="page">
       <PageHeader title="Monitoring" subtitle="Time-based glucose, blood pressure, weight, and activity patterns." meta={monitoring.data?.model_version ? `Trend model: ${monitoring.data.model_version}` : undefined} />
@@ -42,16 +39,7 @@ export function Monitoring() {
       </Card>
       <div className="dashboard-grid">
         <Card title="Add New Log" action={<Plus size={18} />}>
-          <form className="log-form" onSubmit={handleSubmit((values) => addLog.mutate(values))}>
-            <label>Date<input type="date" {...register("log_date")} /></label>
-            <label>Fasting glucose<input type="number" {...register("fasting_glucose", { valueAsNumber: true })} /></label>
-            <label>Post-meal glucose<input type="number" {...register("post_meal_glucose", { valueAsNumber: true })} /></label>
-            <label>Systolic BP<input type="number" {...register("systolic_bp", { valueAsNumber: true })} /></label>
-            <label>Diastolic BP<input type="number" {...register("diastolic_bp", { valueAsNumber: true })} /></label>
-            <label>Activity minutes<input type="number" {...register("activity_minutes", { valueAsNumber: true })} /></label>
-            <button className="primary">{addLog.isPending ? "Saving..." : "Save Log"}</button>
-          </form>
-          {addLog.isError && <ErrorState title="Log could not be saved" body="The monitoring API rejected the new entry. Please try again." />}
+          <LogNewDataForm />
         </Card>
         <Card title="Log History">
           {(logs.data ?? []).length ? <div className="compact-table">{(logs.data ?? []).slice(-8).reverse().map((log) => <div key={log.id}><span>{log.log_date}</span><strong>{log.fasting_glucose} mg/dL</strong><span>{log.systolic_bp}/{log.diastolic_bp}</span></div>)}</div> : <EmptyState title="No log history" body="Use the form to add the first monitoring record." />}
