@@ -1,7 +1,8 @@
 import { Activity, BarChart3, ClipboardList, FileText, HeartPulse, Home, Menu, MessageSquareText, Share2, Utensils } from "lucide-react";
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { GlobalLogNewData } from "./GlobalLogNewData";
 import { ToastProvider } from "./ui";
+import { useAuth } from "../auth/auth";
 
 const nav = [
   { to: "/overview", label: "Overview", icon: Home },
@@ -14,6 +15,11 @@ const nav = [
 ];
 
 export function Layout() {
+  const auth = useAuth();
+  const navigate = useNavigate();
+
+  const initials = (auth.session?.email ?? "").slice(0, 2).toUpperCase() || "GL";
+
   return (
     <ToastProvider>
       <div className="shell">
@@ -33,13 +39,22 @@ export function Layout() {
           </nav>
           <div className="sidebar-footer">
             <span>Help Center</span>
-            <span>Logout</span>
+            <button
+              type="button"
+              className="sidebar-logout"
+              onClick={() => {
+                auth.logout();
+                navigate("/login", { replace: true });
+              }}
+            >
+              Logout
+            </button>
           </div>
         </aside>
         <main>
           <header className="topbar">
             <div className="mobile-brand"><Menu size={18} /> Glyco</div>
-            <div className="avatar">SK</div>
+            <div className="avatar">{initials}</div>
           </header>
           <Outlet />
           <GlobalLogNewData />
