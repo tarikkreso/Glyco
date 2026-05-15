@@ -1,13 +1,12 @@
 import { Activity, BarChart3, ClipboardList, FileText, HeartPulse, Home, Menu, MessageSquareText, PanelLeftClose, PanelLeftOpen, Share2, Utensils } from "lucide-react";
 import { useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
-import { GlobalLogNewData } from "./GlobalLogNewData";
+import { GlobalQuickActions } from "./GlobalQuickActions";
 import { ToastProvider } from "./ui";
 
 const nav = [
   { to: "/overview", label: "Overview", icon: Home },
   { to: "/agent", label: "Agent", icon: MessageSquareText },
-  { to: "/risk-check", label: "Risk Check", icon: HeartPulse },
   { to: "/monitoring", label: "Monitoring", icon: Activity },
   { to: "/reports", label: "Reports", icon: FileText },
   { to: "/care-plan", label: "Care Plan", icon: ClipboardList },
@@ -53,7 +52,7 @@ export function Layout() {
             <div className="avatar">SK</div>
           </header>
           <Outlet />
-          <GlobalLogNewData />
+          <GlobalQuickActions />
         </main>
         <nav className="bottom-nav">
           {nav.slice(0, 5).map((item) => {

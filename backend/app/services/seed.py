@@ -60,9 +60,15 @@ def seed_demo_data() -> None:
         readings = [104, 108, 111, 116, 119, 121, 123, 128, 132, 130, 136, 142, 148, 154]
         db.query(models.HealthLog).filter(models.HealthLog.user_id == 1).delete()
         for idx, glucose in enumerate(readings):
+            is_fasting = idx % 2 == 0
+            value = glucose if is_fasting else glucose + 34
             db.add(models.HealthLog(
-                user_id=1, log_date=start + timedelta(days=idx), fasting_glucose=glucose,
-                post_meal_glucose=glucose + 36, weight_kg=96 - idx * 0.04,
+                user_id=1,
+                log_date=start + timedelta(days=idx),
+                is_fasting=is_fasting,
+                fasting_glucose=value,
+                post_meal_glucose=None if is_fasting else value,
+                weight_kg=96 - idx * 0.04,
                 systolic_bp=136 + (idx % 4) * 3, diastolic_bp=84 + (idx % 3) * 2,
                 activity_minutes=max(8, 25 - idx), notes="Seeded Glyco demo log",
             ))
