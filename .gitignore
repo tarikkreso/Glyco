@@ -46,16 +46,14 @@ yarn-error.log*
 dist/
 build/
 
-# Data and large artifacts
-data/
-ml/artifacts/
+
 
 # Database files
 *.sqlite3
 *.db
 
 # Model artifacts
-*.joblib
+
 
 # Environment / secrets
 .env
@@ -82,6 +80,4 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 backend/glyco.db
-ml/artifacts/*.joblib
-ml/artifacts/*.json
-data/processed/*.json
+
