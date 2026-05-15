@@ -13,6 +13,8 @@ export type HealthLog = {
   id: number;
   user_id: number;
   log_date: string;
+  glucose_level: number;
+  is_fasting: boolean;
   fasting_glucose: number;
   post_meal_glucose?: number;
   weight_kg?: number;
@@ -20,6 +22,7 @@ export type HealthLog = {
   diastolic_bp?: number;
   activity_minutes?: number;
   notes?: string;
+  created_at?: string;
 };
 
 export type RiskAssessment = {
@@ -81,8 +84,11 @@ export type GlycoInsight = {
 
 export type AgentToolCall = {
   name: string;
+  label?: string;
   status: string;
   result_summary?: string;
+  model_version?: string;
+  details?: Record<string, unknown>;
 };
 
 export type GuidelineSnippet = {
@@ -103,6 +109,16 @@ export type AgentChatResponse = {
   llm_mode: string;
   llm_model: string;
   learning_summary: AgentLearningSummary;
+  recommendations?: AgentRecommendation[];
+};
+
+export type AgentRecommendation = {
+  type: string;
+  title: string;
+  body: string;
+  bandit_score?: number;
+  bandit_alpha?: number;
+  bandit_beta?: number;
 };
 
 export type AgentLearningSummary = {
@@ -111,6 +127,20 @@ export type AgentLearningSummary = {
   preferred_tone: string;
   confirmed_actions: string[];
   adaptation_note: string;
+  preferred_action_type?: string;
+  avoided_action_types?: string[];
+  action_type_scores?: Record<string, number>;
+  recent_glucose_pattern?: {
+    label: string;
+    average: number | null;
+    slope: number | null;
+    high_count: number;
+  };
+  next_best_action?: {
+    type: string;
+    title: string;
+    body: string;
+  };
 };
 
 export type AgentFeedback = {
@@ -142,7 +172,7 @@ export const api = {
   bayesianRisk: (userId = 1) => request<BayesianRisk>(`/risk/bayesian/${userId}`),
   latestMonitoring: (userId = 1) => request<MonitoringAssessment>(`/monitoring-assessment/${userId}/latest`),
   assessRisk: (payload: Record<string, unknown>) => request<RiskAssessment>("/risk-assessment", { method: "POST", body: JSON.stringify(payload) }),
-  addLog: (payload: Record<string, unknown>) => request<HealthLog>("/logs", { method: "POST", body: JSON.stringify(payload) }),
+  addLog: (payload: { user_id?: number; glucose_level: number; is_fasting: boolean }) => request<HealthLog>("/logs", { method: "POST", body: JSON.stringify(payload) }),
   assessMonitoring: (userId = 1) => request<MonitoringAssessment>(`/monitoring-assessment?user_id=${userId}`, { method: "POST" }),
   report: (type: string, userId = 1) => request<ReportDocument>(`/reports/${type}?user_id=${userId}`, { method: "POST" }),
   reports: (userId = 1) => request<ReportDocument[]>(`/reports/${userId}`),

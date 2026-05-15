@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.db import models
 from app.ml.inference import build_risk_feature_row, predict_monitoring, predict_risk
 from app.rules.engine import estimate_risk_probability, monitoring_state, profile_flags, risk_level
+from app.services.bayesian import update_bayesian_state
 
 
 def _risk_explanation(profile: models.Profile, probability: float, level: str, top_factors: list[dict], used_fallback: bool) -> str:
@@ -17,11 +18,11 @@ def _risk_explanation(profile: models.Profile, probability: float, level: str, t
 
 def _monitoring_explanation(summary: dict, trend_label: str, used_fallback: bool) -> str:
     source = "trend model" if not used_fallback else "deterministic fallback logic"
-    avg = summary.get("avg_fasting_glucose")
+    avg = summary.get("avg_glucose") or summary.get("avg_fasting_glucose")
     slope = summary.get("slope")
     details = []
     if avg is not None:
-        details.append(f"average fasting glucose {avg} mg/dL")
+        details.append(f"average glucose {avg} mg/dL")
     if slope is not None:
         details.append(f"slope {slope}")
     joined = ", ".join(details) if details else "recent glucose patterns"
@@ -67,6 +68,7 @@ def create_risk_assessment(db: Session, profile: models.Profile):
     db.add(row)
     db.commit()
     db.refresh(row)
+    update_bayesian_state(db, profile.user_id, probability)
     return {
         "id": row.id,
         "user_id": row.user_id,
@@ -126,6 +128,6 @@ def create_monitoring_assessment(db: Session, user_id: int):
         "trend_score": row.trend_score,
         "anomaly_flags": row.anomaly_flags_json,
         "summary": row.summary_json,
-        "recommended_actions": ["Log the next fasting reading", "Review recent meals and activity", "Prepare a clinician summary if warnings persist"],
+        "recommended_actions": ["Log the next glucose reading", "Review recent meals if readings are elevated", "Prepare a clinician summary if warnings persist"],
         "model_version": row.model_version,
     }

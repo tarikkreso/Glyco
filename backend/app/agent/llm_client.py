@@ -22,21 +22,28 @@ class FallbackLLMClient:
 
 def _patient_summary(tools_context: dict) -> dict:
     logs = tools_context.get("logs") or []
-    glucose = [item["fasting_glucose"] for item in logs if item.get("fasting_glucose") is not None]
-    post_meal = [item["post_meal_glucose"] for item in logs if item.get("post_meal_glucose") is not None]
-    activity = [item["activity_minutes"] for item in logs if item.get("activity_minutes") is not None]
+    glucose = [
+        item.get("glucose_level", item.get("fasting_glucose"))
+        for item in logs
+        if item.get("glucose_level", item.get("fasting_glucose")) is not None
+    ]
+    fasting_count = sum(1 for item in logs if item.get("is_fasting"))
+    non_fasting_count = sum(1 for item in logs if item.get("is_fasting") is False)
     return {
         "profile": tools_context.get("profile") or {},
         "risk": tools_context.get("risk") or {},
+        "bayesian": tools_context.get("bayesian") or {},
         "trend": tools_context.get("trend") or {},
         "guidelines": tools_context.get("guidelines") or [],
+        "learning": tools_context.get("learning") or {},
+        "recommendations": tools_context.get("recommendations") or [],
         "log_count": len(logs),
         "avg_glucose": round(mean(glucose), 1) if glucose else None,
         "min_glucose": min(glucose) if glucose else None,
         "max_glucose": max(glucose) if glucose else None,
         "latest_glucose": glucose[-1] if glucose else None,
-        "avg_post_meal": round(mean(post_meal), 1) if post_meal else None,
-        "avg_activity": round(mean(activity), 1) if activity else None,
+        "fasting_count": fasting_count,
+        "non_fasting_count": non_fasting_count,
         "latest_log": logs[-1] if logs else None,
     }
 
@@ -46,8 +53,11 @@ def _build_concise_prompt(messages: list[dict], tools_context: dict) -> str:
     summary = _patient_summary(tools_context)
     profile = summary["profile"]
     risk = summary["risk"]
+    bayesian = summary["bayesian"]
     trend = summary["trend"]
     guidance = "; ".join(item.get("text", "") for item in summary["guidelines"][:2] if item.get("text"))
+    learning = summary["learning"]
+    next_action = learning.get("next_best_action") or {}
     return f"""You are Glyco, a diabetes support assistant.
 
 Always answer in clear English, even if the user asks in another language.
@@ -59,11 +69,15 @@ User question: {user_message}
 Patient summary:
 - Age: {profile.get("age", "unknown")}
 - BMI: {profile.get("bmi", "unknown")}
-- Risk level: {risk.get("risk_level", "unknown")}
-- Monitoring trend: {trend.get("trend_label", "unknown")}
-- Recent average fasting glucose: {summary["avg_glucose"] if summary["avg_glucose"] is not None else "unknown"} mg/dL
+- Trained RF risk model: {risk.get("risk_level", "unknown")} via {risk.get("model_version", "unknown")}
+- Bayesian risk posterior: {bayesian.get("posterior_mean", "unknown")}
+- Trained glucose trend model: {trend.get("trend_label", "unknown")} via {trend.get("model_version", "unknown")}
+- Recent average glucose: {summary["avg_glucose"] if summary["avg_glucose"] is not None else "unknown"} mg/dL
 - Recent logs loaded: {summary["log_count"]}
 - Guidance: {guidance or "Keep logging consistently and contact a clinician for medical decisions."}
+- Learned tone: {learning.get("preferred_tone", "balanced")}
+- Learned focus: {learning.get("preferred_action_type", "monitoring")}
+- Adaptive next action: {next_action.get("title", "Keep glucose logging consistent")}
 
 Answer:"""
 
@@ -73,11 +87,14 @@ def _build_gemini_prompt(messages: list[dict], tools_context: dict) -> str:
     summary = _patient_summary(tools_context)
     profile = summary["profile"]
     risk = summary["risk"]
+    bayesian = summary["bayesian"]
     trend = summary["trend"]
     top_factors = risk.get("top_factors") or []
     related_flags = risk.get("related_flags") or []
     anomaly_flags = trend.get("anomaly_flags") or []
     guidelines = summary["guidelines"]
+    learning = summary["learning"]
+    next_action = learning.get("next_best_action") or {}
     factor_lines = "\n".join(f"- {item.get('label', 'Factor')}: {item.get('detail', '')}" for item in top_factors[:4]) or "- No ranked factors available."
     flag_lines = "\n".join(f"- {item.get('label', 'Flag')}: {item.get('detail', '')}" for item in (related_flags + anomaly_flags)[:5]) or "- No additional flags available."
     guidance_lines = "\n".join(f"- {item.get('category', 'Guidance')}: {item.get('text', '')}" for item in guidelines[:4]) or "- Keep logging consistently and contact a clinician for medical decisions."
@@ -87,6 +104,7 @@ Core rules:
 - Always answer in clear English, even if the user writes in another language.
 - Do not diagnose diabetes, prescribe treatment, or replace a clinician.
 - Do not reveal internal tool names, raw JSON, Python dictionaries, or hidden context.
+- The trained Random Forest and glucose trend models already produced the scores below; you only explain them.
 - Ground the answer in the patient summary below. If data is missing, say what is missing.
 - Be practical and specific. Avoid generic wellness filler.
 - Keep the answer readable in the app: use clear section headings and bullets.
@@ -104,17 +122,25 @@ Patient summary:
 - High cholesterol: {profile.get("high_chol", "unknown")}
 - Physical activity marked active: {profile.get("phys_activity", "unknown")}
 - General health rating: {profile.get("general_health", "unknown")}
-- Risk level: {risk.get("risk_level", "unknown")}
+- Trained RF risk model version: {risk.get("model_version", "unknown")}
+- RF risk level: {risk.get("risk_level", "unknown")}
 - Risk probability: {risk.get("risk_probability", "unknown")}
-- Monitoring trend: {trend.get("trend_label", "unknown")}
+- Bayesian posterior risk mean: {bayesian.get("posterior_mean", "unknown")}
+- Bayesian credible interval: {(bayesian.get("credible_interval") or {}).get("low", "unknown")}-{(bayesian.get("credible_interval") or {}).get("high", "unknown")}
+- Trained glucose trend model version: {trend.get("model_version", "unknown")}
+- Glucose trend label: {trend.get("trend_label", "unknown")}
 - Trend score: {trend.get("trend_score", "unknown")}
 - Recent log count: {summary["log_count"]}
-- Average fasting glucose: {summary["avg_glucose"] if summary["avg_glucose"] is not None else "unknown"} mg/dL
-- Fasting glucose range: {summary["min_glucose"] if summary["min_glucose"] is not None else "unknown"}-{summary["max_glucose"] if summary["max_glucose"] is not None else "unknown"} mg/dL
-- Latest fasting glucose: {summary["latest_glucose"] if summary["latest_glucose"] is not None else "unknown"} mg/dL
-- Average post-meal glucose: {summary["avg_post_meal"] if summary["avg_post_meal"] is not None else "unknown"} mg/dL
-- Average activity minutes: {summary["avg_activity"] if summary["avg_activity"] is not None else "unknown"}
+- Average glucose: {summary["avg_glucose"] if summary["avg_glucose"] is not None else "unknown"} mg/dL
+- Glucose range: {summary["min_glucose"] if summary["min_glucose"] is not None else "unknown"}-{summary["max_glucose"] if summary["max_glucose"] is not None else "unknown"} mg/dL
+- Latest glucose: {summary["latest_glucose"] if summary["latest_glucose"] is not None else "unknown"} mg/dL
+- Fasting readings: {summary["fasting_count"]}
+- Not-fasting readings: {summary["non_fasting_count"]}
 - Latest log: {summary["latest_log"] or "none"}
+- Learned tone preference: {learning.get("preferred_tone", "balanced")}
+- Learned action focus: {learning.get("preferred_action_type", "monitoring")}
+- Recent adaptive glucose pattern: {(learning.get("recent_glucose_pattern") or {}).get("label", "unknown")}
+- Adaptive next action: {next_action.get("title", "Keep glucose logging consistent")} - {next_action.get("body", "")}
 
 Top factors:
 {factor_lines}
@@ -132,7 +158,9 @@ Bottom line
 
 What I see
 - Include 3-5 bullets.
-- Mention the risk level, monitoring trend, fasting glucose pattern, and at least one relevant factor or flag.
+- Mention the risk level, monitoring trend, glucose pattern, and at least one relevant factor or flag.
+- Explicitly say the risk result came from the trained RF model and the trend came from the trained glucose trend model.
+- Explain that the Bayesian layer smooths risk over time.
 
 Why it matters
 - Include 2-4 bullets.
@@ -141,6 +169,7 @@ Why it matters
 What to do this week
 - Include 4-6 concrete, low-risk actions.
 - Make the actions specific enough that the patient or family could do them today.
+- Include the adaptive next action unless it conflicts with safety or the user's question.
 
 Questions for the doctor
 - Include 2-4 useful questions to bring to a clinician.

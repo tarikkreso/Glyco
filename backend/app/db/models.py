@@ -68,6 +68,7 @@ class HealthLog(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     log_date: Mapped[date] = mapped_column(Date)
+    is_fasting: Mapped[bool] = mapped_column(Boolean, default=True)
     fasting_glucose: Mapped[float] = mapped_column(Float)
     post_meal_glucose: Mapped[float | None] = mapped_column(Float)
     hba1c_optional: Mapped[float | None] = mapped_column(Float)
@@ -78,6 +79,10 @@ class HealthLog(Base):
     activity_minutes: Mapped[int | None] = mapped_column(Integer)
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    @property
+    def glucose_level(self) -> float:
+        return self.fasting_glucose
 
 
 class MonitoringAssessment(Base):

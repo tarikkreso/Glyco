@@ -13,6 +13,7 @@ from sklearn.metrics import classification_report, confusion_matrix
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
+from sklearn.utils.class_weight import compute_sample_weight
 
 ROOT = Path(__file__).resolve().parents[2]
 ZIP_PATH = ROOT / "diabetes.zip"
@@ -67,7 +68,7 @@ def load_events() -> pd.DataFrame:
 
 
 def load_prepared_split() -> tuple[pd.DataFrame, pd.DataFrame] | None:
-    train_path = PROCESSED / "trend_train_balanced.csv.gz"
+    train_path = PROCESSED / "trend_train.csv.gz"
     test_path = PROCESSED / "trend_test.csv.gz"
     if not train_path.exists() or not test_path.exists():
         return None
@@ -140,6 +141,10 @@ def assign_label(row: pd.Series) -> str:
 
 def main() -> None:
     ARTIFACTS.mkdir(parents=True, exist_ok=True)
+    # Keep the production trend model aligned with the simplified app contract:
+    # patient-entered glucose value + fasting/not-fasting status. Insulin,
+    # exercise, and symptom events remain in the dataset pipeline for analysis,
+    # but are not model inputs because the patient flow no longer collects them.
     feature_columns = [
         "glucose_mean",
         "glucose_std",
@@ -148,10 +153,6 @@ def main() -> None:
         "glucose_count",
         "high_count",
         "low_count",
-        "insulin_total",
-        "meal_events",
-        "exercise_events",
-        "hypo_events",
         "glucose_slope",
         "mean_3day",
         "std_3day",
@@ -172,7 +173,7 @@ def main() -> None:
         label_distribution = dataset_summary["label_distribution"] if dataset_summary else test_df["trend_label"].value_counts().to_dict()
         train_rows = int(dataset_summary["split"]["train_rows"]) if dataset_summary else int(len(train_df))
         test_rows = int(len(test_df))
-        balanced_train_rows = int(len(train_df))
+        balanced_train_rows = int(dataset_summary.get("balanced_training", {}).get("rows", 0)) if dataset_summary else None
     else:
         events = load_events()
         daily = build_daily_features(events)
@@ -202,14 +203,16 @@ def main() -> None:
     baseline.fit(x_train, y_train)
     baseline_accuracy = float(baseline.score(x_test, y_test))
 
+    sample_weights = compute_sample_weight("balanced", y_train)
+    sample_weights[y_train.eq("watch")] *= 3.0
     model = RandomForestClassifier(
-        n_estimators=180,
+        n_estimators=400,
         random_state=42,
-        class_weight="balanced_subsample",
+        max_features="sqrt",
         min_samples_leaf=2,
         n_jobs=1,
     )
-    model.fit(x_train, y_train)
+    model.fit(x_train, y_train, sample_weight=sample_weights)
     predictions = model.predict(x_test)
     metadata = {
         "rows": source_rows,
@@ -222,9 +225,11 @@ def main() -> None:
         "baseline_accuracy": baseline_accuracy,
         "classification_report": classification_report(y_test, predictions, output_dict=True),
         "confusion_matrix": confusion_matrix(y_test, predictions, labels=["stable", "watch", "concerning"]).tolist(),
-        "model_version": "trend-random-forest-0.1",
-        "split_strategy": split_strategy,
+        "model_version": "glucose-trend-random-forest-0.2",
+        "split_strategy": "prepared patient-wise split with glucose-only weighted training" if prepared_split else split_strategy,
         "patient_overlap": patient_overlap,
+        "feature_contract": "glucose-only patient app inputs",
+        "watch_weight_multiplier": 3.0,
     }
 
     joblib.dump(model, ARTIFACTS / "trend_model.joblib")

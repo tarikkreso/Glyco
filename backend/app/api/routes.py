@@ -1,17 +1,18 @@
 from secrets import token_urlsafe
+from datetime import date
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
 from app.db import models
-from app.agent.anthropic_agent import detect_glucose_anomaly_and_report, run_agent_chat
+from app.agent.anthropic_agent import detect_glucose_anomaly_and_report
 from app.agent.bandit import RecommendationBandit
 from app.agent.agent_service import build_agent_insight, chat_with_agent, proactive_check, record_agent_feedback
 from app.agent.llm_client import get_llm_status
 from app.schemas.schemas import AgentAlertOut, AgentChatIn, AgentChatOut, AgentFeedbackIn, AgentFeedbackOut, FamilyShareIn, HealthLogIn, HealthLogOut, ProfileIn, ProfileOut, ReportOut, UserOut
 from app.rules.engine import calculate_bmi
-from app.services.bayesian import get_or_create_bayesian_state, serialize_bayesian_state, update_bayesian_state
+from app.services.bayesian import get_or_create_bayesian_state, serialize_bayesian_state
 from app.services.assessments import create_monitoring_assessment, create_risk_assessment
 from app.services.pdf_service import generate_pdf_report
 from app.reports.generator import build_report
@@ -80,7 +81,7 @@ def latest_risk(user_id: int, db: Session = Depends(get_db)):
     """Return or refresh the latest Random Forest risk assessment."""
     row = db.query(models.RiskAssessment).filter(models.RiskAssessment.user_id == user_id).order_by(models.RiskAssessment.created_at.desc()).first()
     profile = db.query(models.Profile).filter(models.Profile.user_id == user_id).order_by(models.Profile.created_at.desc()).first()
-    if row and profile and (row.model_version == "rules-fallback-0.1" or profile.updated_at > row.created_at):
+    if row and profile and (row.model_version != "random-forest-0.2" or profile.updated_at > row.created_at):
         return create_risk_assessment(db, profile)
     if not row:
         if not profile:
@@ -99,20 +100,18 @@ def bayesian_risk(user_id: int, db: Session = Depends(get_db)):
 
 @router.post("/logs", response_model=HealthLogOut)
 def create_log(payload: HealthLogIn, db: Session = Depends(get_db)):
-    """Create a health log and update monitoring, Bayesian risk, and alerts."""
-    row = models.HealthLog(**payload.model_dump())
+    """Create a glucose log and update monitoring and alerts."""
+    row = models.HealthLog(
+        user_id=payload.user_id,
+        log_date=date.today(),
+        is_fasting=payload.is_fasting,
+        fasting_glucose=payload.glucose_level,
+        post_meal_glucose=None if payload.is_fasting else payload.glucose_level,
+    )
     db.add(row)
     db.commit()
     db.refresh(row)
     create_monitoring_assessment(db, payload.user_id)
-    risk = db.query(models.RiskAssessment).filter(models.RiskAssessment.user_id == payload.user_id).order_by(models.RiskAssessment.created_at.desc()).first()
-    if not risk:
-        profile = db.query(models.Profile).filter(models.Profile.user_id == payload.user_id).order_by(models.Profile.created_at.desc()).first()
-        if profile:
-            create_risk_assessment(db, profile)
-            risk = db.query(models.RiskAssessment).filter(models.RiskAssessment.user_id == payload.user_id).order_by(models.RiskAssessment.created_at.desc()).first()
-    if risk:
-        update_bayesian_state(db, payload.user_id, risk.risk_probability)
     proactive_check(db, payload.user_id)
     detect_glucose_anomaly_and_report(db, payload.user_id)
     return row
@@ -135,7 +134,7 @@ def latest_monitoring(user_id: int, db: Session = Depends(get_db)):
     """Return or refresh the latest monitoring assessment."""
     row = db.query(models.MonitoringAssessment).filter(models.MonitoringAssessment.user_id == user_id).order_by(models.MonitoringAssessment.created_at.desc()).first()
     latest_log = db.query(models.HealthLog).filter(models.HealthLog.user_id == user_id).order_by(models.HealthLog.log_date.desc()).first()
-    if row and (row.model_version == "engineered-rules-0.1" or (latest_log and latest_log.created_at > row.created_at)):
+    if row and (row.model_version != "glucose-trend-random-forest-0.2" or (latest_log and latest_log.created_at > row.created_at)):
         return create_monitoring_assessment(db, user_id)
     if not row:
         return create_monitoring_assessment(db, user_id)
@@ -195,22 +194,15 @@ def glyco_insight(user_id: int, db: Session = Depends(get_db)):
 
 @router.post("/agent/chat", response_model=AgentChatOut)
 def agent_chat(payload: AgentChatIn, db: Session = Depends(get_db)):
-    """Run the v1 Anthropic-capable agent chat endpoint."""
+    """Run the Glyco agent pipeline with Gemini/fallback verbalization."""
     if not db.get(models.User, payload.user_id):
         raise HTTPException(404, "User not found")
-    agent_result = run_agent_chat(db, payload.user_id, payload.message)
-    legacy = chat_with_agent(db, payload.user_id, payload.message)
-    response_text = agent_result["response"]
-    answer_text = legacy["answer"]
-    if agent_result["proactive_alert"] and agent_result["response"] not in answer_text:
-        response_text = agent_result["response"]
+    result = chat_with_agent(db, payload.user_id, payload.message)
     return {
-        **legacy,
-        "answer": answer_text,
-        "response": response_text,
-        "tools_used": agent_result["tools_used"],
-        "tool_calls": legacy["tool_calls"],
-        "proactive_alert": agent_result["proactive_alert"],
+        **result,
+        "response": result["answer"],
+        "tools_used": [tool["name"] for tool in result["tool_calls"]],
+        "proactive_alert": False,
     }
 
 

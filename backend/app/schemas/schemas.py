@@ -41,20 +41,25 @@ class ProfileOut(ProfileIn):
 
 class HealthLogIn(BaseModel):
     user_id: int = 1
-    log_date: date
-    fasting_glucose: float = Field(118, ge=40, le=450)
-    post_meal_glucose: float | None = Field(None, ge=40, le=500)
-    hba1c_optional: float | None = Field(None, ge=3, le=15)
-    weight_kg: float | None = Field(None, ge=30, le=250)
-    bmi_optional: float | None = Field(None, ge=10, le=80)
-    systolic_bp: int | None = Field(None, ge=70, le=250)
-    diastolic_bp: int | None = Field(None, ge=40, le=160)
-    activity_minutes: int | None = Field(None, ge=0, le=300)
-    notes: str | None = None
+    glucose_level: float = Field(118, ge=40, le=500)
+    is_fasting: bool = True
 
 
-class HealthLogOut(HealthLogIn):
+class HealthLogOut(BaseModel):
     id: int
+    user_id: int
+    log_date: date
+    glucose_level: float
+    is_fasting: bool
+    fasting_glucose: float
+    post_meal_glucose: float | None = None
+    hba1c_optional: float | None = None
+    weight_kg: float | None = None
+    bmi_optional: float | None = None
+    systolic_bp: int | None = None
+    diastolic_bp: int | None = None
+    activity_minutes: int | None = None
+    notes: str | None = None
     created_at: datetime
     model_config = {"from_attributes": True}
 
@@ -117,6 +122,7 @@ class AgentChatOut(BaseModel):
     llm_mode: str
     llm_model: str
     learning_summary: dict
+    recommendations: list[dict] = []
 
 
 class AgentFeedbackIn(BaseModel):

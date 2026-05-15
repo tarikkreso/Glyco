@@ -88,6 +88,7 @@ def test_agent_chat_without_anthropic_key_uses_fallback(monkeypatch) -> None:
     finally:
         db.query(models.AgentMemory).filter(models.AgentMemory.user_id == user.id).delete()
         db.query(models.BanditArmState).filter(models.BanditArmState.user_id == user.id).delete()
+        db.query(models.BayesianRiskState).filter(models.BayesianRiskState.user_id == user.id).delete()
         db.query(models.RiskAssessment).filter(models.RiskAssessment.user_id == user.id).delete()
         db.query(models.MonitoringAssessment).filter(models.MonitoringAssessment.user_id == user.id).delete()
         db.query(models.Profile).filter(models.Profile.user_id == user.id).delete()

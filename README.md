@@ -18,7 +18,7 @@ The product is meant to help users track health data, review risk signals, and g
 
 - Shows the latest diabetes risk estimate
 - Shows the latest monitoring trend
-- Plots fasting glucose history
+- Plots glucose history
 - Lists the strongest contributing risk factors
 - Displays a generated Glyco insight summary
 
@@ -36,7 +36,7 @@ The product is meant to help users track health data, review risk signals, and g
 
 ### Monitoring
 
-- Stores glucose, blood pressure, weight, and activity logs
+- Stores simple glucose readings with fasting / not-fasting status
 - Rebuilds the monitoring trend after each log entry
 - Shows:
   - current monitoring state
@@ -95,7 +95,7 @@ The product is meant to help users track health data, review risk signals, and g
 ### Machine Learning
 
 - Risk model artifacts live in `ml/artifacts`
-- Monitoring trend model artifacts live in `ml/artifacts`
+- Glucose trend model artifacts live in `ml/artifacts`
 - Training and dataset-preparation scripts live in `ml/scripts`
 - The backend loads the trained artifacts when available
 - If artifacts cannot be loaded, the backend falls back to deterministic rules so the app still works
@@ -151,9 +151,9 @@ So the training data influences:
 
 It does not change the original user profile row.
 
-### Monitoring Model Training Data
+### Glucose Trend Model Training Data
 
-The monitoring trend model is built from the UCI diabetes time-series archive:
+The monitoring trend model is built from the UCI diabetes time-series archive, but its production feature contract now uses only glucose-derived features that match the simplified patient flow:
 
 - source: `diabetes.zip`
 - preparation script: `ml/scripts/prepare_datasets.py`
@@ -167,12 +167,12 @@ That pipeline:
 - labels days as `stable`, `watch`, or `concerning`
 - splits data by patient so the same patient does not appear in both train and test sets
 - oversamples minority labels only in the training split
-- trains a random forest classifier
+- trains a class-weighted random forest classifier with extra weight on the difficult `watch` class
 - saves model metadata and feature definitions
 
-When a user adds health logs:
+When a user adds glucose readings:
 
-- the backend rebuilds the recent daily feature window
+- the backend rebuilds the recent glucose feature window
 - the model predicts the current monitoring state
 - the backend stores the outcome in the `monitoring_assessments` table
 

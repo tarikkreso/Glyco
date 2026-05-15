@@ -61,7 +61,7 @@ def estimate_risk_probability(profile) -> tuple[float, list[dict]]:
 def monitoring_state(logs) -> dict:
     ordered = sorted(logs, key=lambda log: log.log_date)
     recent = ordered[-14:]
-    glucose = [log.fasting_glucose for log in recent if log.fasting_glucose is not None]
+    glucose = [log.glucose_level for log in recent if log.glucose_level is not None]
     if not glucose:
         return {"trend_label": "watch", "trend_score": 0.5, "anomaly_flags": [], "summary": {"message": "More readings are needed."}}
     avg_glucose = round(mean(glucose), 1)
@@ -70,14 +70,11 @@ def monitoring_state(logs) -> dict:
     high_count = sum(1 for value in glucose if value >= 130)
     flags = []
     if high_count >= 3:
-        flags.append({"level": "warning", "label": "Repeated elevated fasting readings", "detail": f"{high_count} recent readings were at or above 130 mg/dL."})
+        flags.append({"level": "warning", "label": "Repeated elevated glucose readings", "detail": f"{high_count} recent readings were at or above 130 mg/dL."})
     if slope >= 3:
-        flags.append({"level": "danger", "label": "Rising glucose pattern", "detail": f"Recent fasting glucose is rising about {slope} mg/dL per log."})
+        flags.append({"level": "danger", "label": "Rising glucose pattern", "detail": f"Recent glucose is rising about {slope} mg/dL per log."})
     if variability >= 25:
         flags.append({"level": "warning", "label": "High glucose variability", "detail": f"Recent variability is {variability} mg/dL."})
-    bp_values = [(log.systolic_bp, log.diastolic_bp) for log in recent if log.systolic_bp and log.diastolic_bp]
-    if sum(1 for sys, dia in bp_values if sys >= 140 or dia >= 90) >= 2:
-        flags.append({"level": "warning", "label": "Blood pressure pattern", "detail": "Multiple recent blood pressure logs are elevated."})
     score = min(1, max(0, (avg_glucose - 95) / 80 + high_count * 0.04 + max(slope, 0) * 0.04))
     label = "stable"
     if score >= 0.68 or any(flag["level"] == "danger" for flag in flags):
@@ -89,6 +86,7 @@ def monitoring_state(logs) -> dict:
         "trend_score": round(score, 2),
         "anomaly_flags": flags,
         "summary": {
+            "avg_glucose": avg_glucose,
             "avg_fasting_glucose": avg_glucose,
             "variability": variability,
             "slope": slope,

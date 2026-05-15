@@ -96,7 +96,7 @@ def _rolling_mean(values: list[float], window: int) -> float:
 def _build_daily_monitoring_rows(logs: list) -> list[dict]:
     records: list[dict] = []
     for log in sorted(logs, key=lambda item: item.log_date):
-        glucose_values = [value for value in [log.fasting_glucose, log.post_meal_glucose] if value is not None]
+        glucose_values = [log.glucose_level] if log.glucose_level is not None else []
         if not glucose_values:
             continue
         mean_value = mean(glucose_values)
@@ -112,8 +112,8 @@ def _build_daily_monitoring_rows(logs: list) -> list[dict]:
                 "high_count": sum(1 for value in glucose_values if value >= 180),
                 "low_count": sum(1 for value in glucose_values if value < 70),
                 "insulin_total": 0.0,
-                "meal_events": int(log.post_meal_glucose is not None),
-                "exercise_events": int((log.activity_minutes or 0) >= 20),
+                "meal_events": int(not getattr(log, "is_fasting", True)),
+                "exercise_events": 0,
                 "hypo_events": 0,
             }
         )

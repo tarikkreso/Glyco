@@ -1,8 +1,8 @@
-import { Activity, BarChart3, ClipboardList, FileText, HeartPulse, Home, Menu, MessageSquareText, Share2, Utensils } from "lucide-react";
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { Activity, BarChart3, ClipboardList, FileText, HeartPulse, Home, Menu, MessageSquareText, PanelLeftClose, PanelLeftOpen, Share2, Utensils } from "lucide-react";
+import { useState } from "react";
+import { NavLink, Outlet } from "react-router-dom";
 import { GlobalLogNewData } from "./GlobalLogNewData";
 import { ToastProvider } from "./ui";
-import { useAuth } from "../auth/auth";
 
 const nav = [
   { to: "/overview", label: "Overview", icon: Home },
@@ -15,14 +15,11 @@ const nav = [
 ];
 
 export function Layout() {
-  const auth = useAuth();
-  const navigate = useNavigate();
-
-  const initials = (auth.session?.email ?? "").slice(0, 2).toUpperCase() || "GL";
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   return (
     <ToastProvider>
-      <div className="shell">
+      <div className={`shell ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
         <aside className="sidebar">
           <div className="brand-mark">
             <div className="seal"><BarChart3 size={18} /></div>
@@ -31,30 +28,29 @@ export function Layout() {
               <span>Clinical Center</span>
             </div>
           </div>
+          <button
+            type="button"
+            className="sidebar-collapse-button"
+            onClick={() => setSidebarCollapsed((value) => !value)}
+            aria-label={sidebarCollapsed ? "Expand navigation" : "Collapse navigation"}
+          >
+            {sidebarCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+          </button>
           <nav>
             {nav.map((item) => {
               const Icon = item.icon;
-              return <NavLink to={item.to} key={item.to}><Icon size={19} />{item.label}</NavLink>;
+              return <NavLink to={item.to} key={item.to} title={sidebarCollapsed ? item.label : undefined}><Icon size={19} /><span>{item.label}</span></NavLink>;
             })}
           </nav>
           <div className="sidebar-footer">
             <span>Help Center</span>
-            <button
-              type="button"
-              className="sidebar-logout"
-              onClick={() => {
-                auth.logout();
-                navigate("/login", { replace: true });
-              }}
-            >
-              Logout
-            </button>
+            <span>Logout</span>
           </div>
         </aside>
         <main>
           <header className="topbar">
             <div className="mobile-brand"><Menu size={18} /> Glyco</div>
-            <div className="avatar">{initials}</div>
+            <div className="avatar">SK</div>
           </header>
           <Outlet />
           <GlobalLogNewData />

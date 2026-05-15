@@ -61,7 +61,7 @@ export function GlobalLogNewData() {
                 </button>
               }
             >
-              <p className="log-panel-meta">Quick entry for {today}. You can change the date.</p>
+              <p className="log-panel-meta">Quick glucose entry for {today}. Date and time are recorded automatically.</p>
               <LogNewDataForm onSuccess={() => setOpen(false)} />
             </Card>
           </div>

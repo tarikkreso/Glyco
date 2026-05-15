@@ -1,6 +1,7 @@
 from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import inspect, text
 
 from app.api.routes import router
 from app.db.database import Base, engine
@@ -28,6 +29,20 @@ def _load_env_file() -> None:
 _load_env_file()
 
 Base.metadata.create_all(bind=engine)
+
+
+def _ensure_lightweight_schema_updates() -> None:
+    """Apply tiny SQLite-safe updates for local demo databases."""
+    inspector = inspect(engine)
+    if "health_logs" not in inspector.get_table_names():
+        return
+    columns = {column["name"] for column in inspector.get_columns("health_logs")}
+    if "is_fasting" not in columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE health_logs ADD COLUMN is_fasting BOOLEAN DEFAULT 1"))
+
+
+_ensure_lightweight_schema_updates()
 seed_demo_data()
 
 app = FastAPI(title="Glyco API", version="0.1.0")

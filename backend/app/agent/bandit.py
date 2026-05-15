@@ -90,6 +90,6 @@ def default_recommendations() -> list[dict]:
     return [
         {"type": "nutrition", "title": "Pair carbohydrates with protein or fiber", "body": "Review the largest carbohydrate meal and add a lower-glycemic swap this week."},
         {"type": "activity", "title": "Walk after the largest meal", "body": "Aim for 10 to 15 minutes of light movement after the meal most linked with higher readings."},
-        {"type": "monitoring", "title": "Keep fasting glucose logging consistent", "body": "Add the next fasting reading so Glyco can detect whether the pattern is improving."},
+        {"type": "monitoring", "title": "Keep glucose logging consistent", "body": "Add the next glucose reading so Glyco can detect whether the pattern is improving."},
         {"type": "medication_check", "title": "Prepare medication questions", "body": "Ask the clinician whether the current monitoring pattern changes medication review timing."},
     ]

@@ -1,10 +1,17 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { ArrowUp, ClipboardList, Database, History, RotateCcw, ShieldCheck, Sparkles } from "lucide-react";
+import { ArrowUp, ClipboardList, Database, ShieldCheck, Zap, Bot, User, Stethoscope } from "lucide-react";
 import type { ReactNode } from "react";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect, useRef } from "react";
+import { useLocation } from "react-router-dom";
 import { api, type AgentChatResponse } from "../api/client";
 import { Badge, Card, EmptyState, ErrorState, LoadingState, PageHeader } from "../components/ui";
-import { appendAgentAssistantMessage, appendAgentUserMessage, resetAgentConversation, setAgentDraft, useAgentChatSession } from "../state/agentChatSession";
+import "./Agent.css";
+
+type ChatMessage = {
+  role: "user" | "assistant";
+  content: string;
+  response?: AgentChatResponse;
+};
 
 const quickPrompts = [
   "Should I be worried this week?",
@@ -76,29 +83,25 @@ function FormattedResponse({ content }: { content: string }) {
 }
 
 export function Agent() {
-  const chatSession = useAgentChatSession();
+  const [input, setInput] = useState(quickPrompts[0]);
   const [feedbackTone, setFeedbackTone] = useState("concise");
-  const [historyOpen, setHistoryOpen] = useState(false);
+  const [messages, setMessages] = useState<ChatMessage[]>([
+    {
+      role: "assistant",
+      content: "Ask Glyco about this week's risk, monitoring changes, doctor questions, or family support. The agent will use your profile, logs, model results, and curated guidance notes.",
+    },
+  ]);
   const risk = useQuery({ queryKey: ["risk"], queryFn: () => api.latestRisk() });
   const monitoring = useQuery({ queryKey: ["monitoring"], queryFn: () => api.latestMonitoring() });
   const logs = useQuery({ queryKey: ["logs"], queryFn: () => api.logs() });
   const alerts = useQuery({ queryKey: ["alerts"], queryFn: () => api.alerts() });
-  const latestResponse = useMemo(() => [...chatSession.messages].reverse().find((item) => item.response)?.response, [chatSession.messages]);
-  const chatHistory = useMemo(() => chatSession.messages.filter((message) => message.role === "user"), [chatSession.messages]);
+  const latestResponse = useMemo(() => [...messages].reverse().find((item) => item.response)?.response, [messages]);
   const llmLabel = latestResponse ? `${latestResponse.llm_mode}: ${latestResponse.llm_model}` : "fallback";
   const learning = latestResponse?.learning_summary;
-  const evidenceLabels = (response: AgentChatResponse) => (
-    response.tool_calls.length
-      ? response.tool_calls.map((tool) => `${tool.label ?? tool.name}: ${tool.result_summary ?? tool.status}`)
-      : (response.tools_used ?? []).map((name) => `${name}: used`)
-  );
   const chat = useMutation({
     mutationFn: (message: string) => api.agentChat(message),
     onSuccess: (response, message) => {
-      appendAgentAssistantMessage(response.answer, response);
-    },
-    onError: () => {
-      appendAgentAssistantMessage("I could not reach the agent service. Try again after the API is available.");
+      setMessages((items) => [...items, { role: "user", content: message }, { role: "assistant", content: response.answer, response }]);
     },
   });
   const feedback = useMutation({
@@ -110,47 +113,25 @@ export function Agent() {
       notes: helpful ? "User confirmed this answer style was useful." : "User wants a different style next time.",
     }),
     onSuccess: () => {
-      appendAgentAssistantMessage("Feedback saved. Glyco will use it to personalize the next answer.");
+      setMessages((items) => [...items, { role: "assistant", content: "Feedback saved. Glyco will use it to personalize the next answer." }]);
     },
   });
-  const submit = (message = chatSession.draft) => {
+  const submit = (message = input) => {
     const trimmed = message.trim();
     if (!trimmed || chat.isPending) return;
-    appendAgentUserMessage(trimmed);
     chat.mutate(trimmed);
+    setInput("");
   };
   return (
-    <div className="page agent-page frosty-agent-page">
-      <PageHeader title="Glyco Chat" subtitle="Ask natural-language questions while Glyco runs your trained RF risk model, trained glucose trend model, Bayesian layer, and adaptive recommendation ranker." meta={`Mode: ${llmLabel}`} />
+    <div className="page">
+      <PageHeader title="Agent" subtitle="Ask natural-language questions while Glyco calls the risk model, trend model, logs, reports, and guidance tools." meta={`Mode: ${llmLabel}`} />
       <div className="agent-layout">
-        <Card title="Glyco Agent" action={<div className="agent-card-actions"><button type="button" className="secondary history-toggle" onClick={() => setHistoryOpen((value) => !value)}><History size={15} /> History</button><Badge>{llmLabel}</Badge></div>}>
-          <div className="agent-ambient-mark" aria-hidden="true">
-            <Sparkles size={18} />
-            <span>Frosted AI workspace</span>
-          </div>
-          {historyOpen && (
-            <div className="chat-history-panel">
-              <header>
-                <strong>Chat history</strong>
-                <button type="button" className="icon-button" onClick={resetAgentConversation} aria-label="Start a new chat"><RotateCcw size={15} /></button>
-              </header>
-              {chatHistory.length ? (
-                <div className="chat-history-list">
-                  {chatHistory.slice().reverse().map((message) => (
-                    <button type="button" key={message.created_at} onClick={() => setAgentDraft(message.content)}>
-                      <span>{new Date(message.created_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
-                      <strong>{message.content}</strong>
-                    </button>
-                  ))}
-                </div>
-              ) : <EmptyState title="No past chats yet" body="Ask Glyco a question and it will appear here." />}
-            </div>
-          )}
+        <Card title="Glyco Agent" action={<Badge>{llmLabel}</Badge>}>
           <div className="prompt-row">
             {quickPrompts.map((prompt) => <button key={prompt} className="secondary" type="button" onClick={() => submit(prompt)}>{prompt}</button>)}
           </div>
           <div className="chat-thread" aria-live="polite">
-            {chatSession.messages.map((message, index) => (
+            {messages.map((message, index) => (
               <article className={`chat-message ${message.role}`} key={`${message.role}-${index}`}>
                 <span>{message.role === "assistant" ? "Glyco" : "You"}</span>
                 {message.role === "assistant" ? <FormattedResponse content={message.content} /> : <p>{message.content}</p>}
@@ -159,16 +140,13 @@ export function Agent() {
                     {message.response.proactive_alert && <div className="proactive-banner">Proactive alert generated from recent glucose readings.</div>}
                     <strong>Tools used</strong>
                     <div className="tool-list">
-                      {evidenceLabels(message.response).map((label) => <span key={label}>{label}</span>)}
+                      {(message.response.tools_used?.length
+                        ? message.response.tools_used.map((name) => `${name}: used`)
+                        : message.response.tool_calls.map((tool) => `${tool.name}: ${tool.result_summary ?? tool.status}`))
+                        .map((label) => <span key={label}>{label}</span>)}
                     </div>
                     <strong>Learning signal</strong>
                     <p>{message.response.learning_summary.adaptation_note}</p>
-                    {message.response.recommendations?.[0] && (
-                      <>
-                        <strong>Next-best action</strong>
-                        <p>{message.response.recommendations[0].title}</p>
-                      </>
-                    )}
                   </div>
                 )}
               </article>
@@ -177,7 +155,7 @@ export function Agent() {
             {chat.isError && <ErrorState title="Agent could not answer" body="The chat request failed. Check the API connection and try again." />}
           </div>
           <form className="chat-compose" onSubmit={(event) => { event.preventDefault(); submit(); }}>
-            <input value={chatSession.draft} onChange={(event) => setAgentDraft(event.target.value)} placeholder="Ask Glyco about this week..." aria-label="Ask Glyco" />
+            <input value={input} onChange={(event) => setInput(event.target.value)} placeholder="Ask Glyco about this week..." aria-label="Ask Glyco" />
             <button className="primary" type="submit" aria-label="Send message"><ArrowUp size={16} /></button>
           </form>
           {latestResponse && (
@@ -201,11 +179,8 @@ export function Agent() {
             {learning ? (
               <div className="memory-stack">
                 <div><span>Preferred tone</span><strong>{learning.preferred_tone}</strong></div>
-                <div><span>Learned focus</span><strong>{learning.preferred_action_type ?? "monitoring"}</strong></div>
-                <div><span>Glucose pattern</span><strong>{learning.recent_glucose_pattern?.label ?? "new"}</strong></div>
                 <div><span>Helpfulness</span><strong>{learning.helpful_rate === null ? "new" : `${Math.round(learning.helpful_rate * 100)}%`}</strong></div>
                 <p>{learning.adaptation_note}</p>
-                {learning.next_best_action && <small>Next: {learning.next_best_action.title}</small>}
                 {learning.confirmed_actions.length > 0 && <small>Remembered: {learning.confirmed_actions[0]}</small>}
               </div>
             ) : <EmptyState title="No memory yet" body="Ask a question and save feedback to activate personalization." />}

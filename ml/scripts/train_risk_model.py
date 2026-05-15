@@ -59,19 +59,21 @@ def main() -> None:
     model.fit(x_train, y_train)
 
     probabilities = model.predict_proba(x_test)[:, 1]
-    predictions = (probabilities >= 0.35).astype(int)
+    threshold = 0.50
+    predictions = (probabilities >= threshold).astype(int)
     metrics = {
         "rows": int(len(df)),
         "features": list(x_train.columns),
         "roc_auc": float(roc_auc_score(y_test, probabilities)),
         "classification_report": classification_report(y_test, predictions, output_dict=True),
         "confusion_matrix": confusion_matrix(y_test, predictions).tolist(),
-        "threshold": 0.35,
-        "model_version": "random-forest-0.1",
+        "threshold": threshold,
+        "operating_point": "balanced_precision_recall",
+        "model_version": "random-forest-0.2",
         "split_strategy": split_strategy,
     }
     joblib.dump(model, ARTIFACTS / "risk_model.joblib")
-    joblib.dump({"features": list(x_train.columns), "threshold": 0.35}, ARTIFACTS / "risk_preprocessor.joblib")
+    joblib.dump({"features": list(x_train.columns), "threshold": threshold}, ARTIFACTS / "risk_preprocessor.joblib")
     (ARTIFACTS / "risk_metadata.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
     print(json.dumps({"roc_auc": metrics["roc_auc"], "artifacts": str(ARTIFACTS)}, indent=2))
 
