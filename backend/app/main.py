@@ -22,7 +22,7 @@ def _load_env_file() -> None:
             key, value = line.split("=", 1)
             key = key.strip()
             value = value.strip().strip('"').strip("'")
-            if key:
+            if key and key not in __import__("os").environ:
                 __import__("os").environ[key] = value
 
 

@@ -11,22 +11,61 @@ import joblib
 from app.rules.engine import risk_level
 
 ROOT = Path(__file__).resolve().parents[3]
-ARTIFACTS = ROOT / "ml" / "artifacts"
+
+
+def _artifact_dir() -> Path:
+    """Return the first artifact directory that contains the model bundles."""
+    candidates = [
+        Path(__file__).resolve().parents[2] / "ml" / "artifacts",
+        ROOT / "ml" / "artifacts",
+    ]
+    for candidate in candidates:
+        if (candidate / "risk_model.joblib").exists() or (candidate / "trend_model.joblib").exists():
+            return candidate
+    return candidates[-1]
+
+
+ARTIFACTS = _artifact_dir()
+
+
+def _is_lfs_pointer(path: Path) -> bool:
+    """Detect Git LFS pointer files before joblib/json parsing hides the cause."""
+    if not path.exists() or path.stat().st_size > 1024:
+        return False
+    try:
+        return path.read_text(encoding="utf-8").startswith("version https://git-lfs.github.com/spec/v1")
+    except UnicodeDecodeError:
+        return False
+
+
+def _ensure_real_artifact(path: Path) -> None:
+    if _is_lfs_pointer(path):
+        raise RuntimeError(f"artifact-lfs-pointer:{path.name}")
 
 
 @lru_cache(maxsize=1)
 def _load_risk_bundle() -> dict:
-    model = joblib.load(ARTIFACTS / "risk_model.joblib")
-    preprocessor = joblib.load(ARTIFACTS / "risk_preprocessor.joblib")
-    metadata = json.loads((ARTIFACTS / "risk_metadata.json").read_text(encoding="utf-8"))
+    model_path = ARTIFACTS / "risk_model.joblib"
+    preprocessor_path = ARTIFACTS / "risk_preprocessor.joblib"
+    metadata_path = ARTIFACTS / "risk_metadata.json"
+    for path in (model_path, preprocessor_path, metadata_path):
+        _ensure_real_artifact(path)
+    model = joblib.load(model_path)
+    preprocessor = joblib.load(preprocessor_path)
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
     return {"model": model, "preprocessor": preprocessor, "metadata": metadata}
 
 
 @lru_cache(maxsize=1)
 def _load_trend_bundle() -> dict:
-    model = joblib.load(ARTIFACTS / "trend_model.joblib")
-    preprocessor = joblib.load(ARTIFACTS / "trend_preprocessor.joblib")
-    metadata = json.loads((ARTIFACTS / "trend_metadata.json").read_text(encoding="utf-8"))
+    model_path = ARTIFACTS / "trend_model.joblib"
+    preprocessor_path = ARTIFACTS / "trend_preprocessor.joblib"
+    metadata_path = ARTIFACTS / "trend_metadata.json"
+    for path in (model_path, preprocessor_path, metadata_path):
+        _ensure_real_artifact(path)
+    model = joblib.load(model_path)
+    preprocessor = joblib.load(preprocessor_path)
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
     return {"model": model, "preprocessor": preprocessor, "metadata": metadata}
 
 
@@ -109,7 +148,7 @@ def _build_daily_monitoring_rows(logs: list) -> list[dict]:
                 "glucose_min": min(glucose_values),
                 "glucose_max": max(glucose_values),
                 "glucose_count": len(glucose_values),
-                "high_count": sum(1 for value in glucose_values if value >= 180),
+                "high_count": sum(1 for value in glucose_values if value >= (130 if getattr(log, "is_fasting", True) else 180)),
                 "low_count": sum(1 for value in glucose_values if value < 70),
                 "insulin_total": 0.0,
                 "meal_events": int(not getattr(log, "is_fasting", True)),

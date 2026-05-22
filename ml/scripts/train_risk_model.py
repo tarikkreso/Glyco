@@ -19,6 +19,15 @@ ARTIFACTS = ROOT / "ml" / "artifacts"
 PROCESSED = ROOT / "data" / "processed"
 
 
+def is_lfs_pointer(path: Path) -> bool:
+    if not path.exists() or path.stat().st_size > 1024:
+        return False
+    try:
+        return path.read_text(encoding="utf-8").startswith("version https://git-lfs.github.com/spec/v1")
+    except UnicodeDecodeError:
+        return False
+
+
 def load_cdc() -> pd.DataFrame:
     with zipfile.ZipFile(ZIP_PATH) as archive:
         with archive.open("diabetes_binary_health_indicators_BRFSS2015.csv") as handle:
@@ -28,7 +37,7 @@ def load_cdc() -> pd.DataFrame:
 def load_prepared_split() -> tuple[pd.DataFrame, pd.DataFrame] | None:
     train_path = PROCESSED / "risk_train.csv.gz"
     test_path = PROCESSED / "risk_test.csv.gz"
-    if not train_path.exists() or not test_path.exists():
+    if not train_path.exists() or not test_path.exists() or is_lfs_pointer(train_path) or is_lfs_pointer(test_path):
         return None
     return pd.read_csv(train_path), pd.read_csv(test_path)
 

@@ -23,7 +23,7 @@ const metricCopy: Record<string, { title: string; plain: string; icon: typeof Tr
   },
   risk: {
     title: "Risk score",
-    plain: "This comes from the trained Random Forest risk model. It is screening support, not a diagnosis.",
+    plain: "This comes from the active risk scorer. When RF artifacts are available, Glyco uses the trained Random Forest model; otherwise it falls back to transparent rules.",
     icon: Brain,
   },
   activity: {
@@ -61,6 +61,8 @@ export function MetricDetail() {
   const values = useMemo(() => (logs.data ?? []).slice(-8).map((log) => log.glucose_level), [logs.data]);
   const average = values.length ? Math.round(values.reduce((sum, value) => sum + value, 0) / values.length) : undefined;
   const thompsonAction = insight.data?.learning_summary?.next_best_action;
+  const riskSource = risk.data?.model_version === "random-forest-0.2" ? "trained RF risk model" : "risk fallback scorer";
+  const trendSource = monitoring.data?.model_version === "glucose-trend-random-forest-0.2" ? "trained glucose trend model" : "monitoring fallback scorer";
   const primaryValue = {
     glucose: latestLog ? `${latestLog.glucose_level} mg/dL` : "-",
     nutrition: thompsonAction?.type ?? (risk.data?.risk_level === "high" ? "watch" : "steady"),
@@ -87,8 +89,8 @@ export function MetricDetail() {
         <Card title="Why this matters">
           <ul className="explain-list">
             <li>Glyco looks for patterns across logs, model output, and feedback, not just one isolated value.</li>
-            <li>The trained glucose trend model describes the recent reading pattern as <strong>{monitoring.data?.trend_label ?? "unknown"}</strong>.</li>
-            <li>The trained RF risk model currently estimates <strong>{risk.data?.risk_level ?? "unknown"}</strong> risk.</li>
+            <li>The {trendSource} describes the recent reading pattern as <strong>{monitoring.data?.trend_label ?? "unknown"}</strong>.</li>
+            <li>The {riskSource} currently estimates <strong>{risk.data?.risk_level ?? "unknown"}</strong> risk.</li>
           </ul>
         </Card>
         <Card title="What Glyco uses">

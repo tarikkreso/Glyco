@@ -55,6 +55,21 @@ export type MonitoringAssessment = {
   model_version: string;
 };
 
+export type GlucoseForecast = {
+  user_id: number;
+  current_glucose: number;
+  predictions: Record<"60" | "120" | "180" | "240", number>;
+  confidence_intervals: Record<"60" | "120" | "180" | "240", { low: number; high: number }>;
+  trend_direction: "rising" | "falling" | "stable" | string;
+  predicted_low_alert: boolean;
+  predicted_high_alert: boolean;
+  recommendation: string;
+  model_version: string;
+  used_fallback: boolean;
+  horizon_minutes: number[];
+  created_at?: string;
+};
+
 export type ReportDocument = {
   id?: number;
   user_id?: number;
@@ -165,12 +180,37 @@ export type AgentAlert = {
   acknowledged_at?: string;
 };
 
+export type CarePlan = {
+  user_id: number;
+  source: string;
+  direction: string;
+  prefer: string[];
+  limit: string[];
+  sample_day: string[];
+  weekly_recommendations: string[];
+  signals?: {
+    risk_level?: string;
+    risk_model_version?: string;
+    trend_label?: string;
+    trend_model_version?: string;
+    latest_glucose?: number;
+    latest_is_fasting?: boolean;
+    avg_fasting?: number | null;
+    avg_post_meal?: number | null;
+    bayesian_posterior?: number;
+    top_recommendation_type?: string;
+  };
+};
+
 export const api = {
   demoUser: () => request<{ id: number; full_name: string }>("/users/demo", { method: "POST" }),
   logs: (userId = 1) => request<HealthLog[]>(`/logs/${userId}`),
   latestRisk: (userId = 1) => request<RiskAssessment>(`/risk-assessment/${userId}/latest`),
   bayesianRisk: (userId = 1) => request<BayesianRisk>(`/risk/bayesian/${userId}`),
   latestMonitoring: (userId = 1) => request<MonitoringAssessment>(`/monitoring-assessment/${userId}/latest`),
+  getForecastLatest: (userId = 1) => request<GlucoseForecast>(`/forecast/${userId}/latest`),
+  getForecastHistory: (userId = 1) => request<GlucoseForecast[]>(`/forecast/${userId}/history`),
+  triggerForecast: (userId = 1) => request<GlucoseForecast>(`/forecast/${userId}`, { method: "POST" }),
   assessRisk: (payload: Record<string, unknown>) => request<RiskAssessment>("/risk-assessment", { method: "POST", body: JSON.stringify(payload) }),
   addLog: (payload: { user_id?: number; glucose_level: number; is_fasting: boolean }) => request<HealthLog>("/logs", { method: "POST", body: JSON.stringify(payload) }),
   assessMonitoring: (userId = 1) => request<MonitoringAssessment>(`/monitoring-assessment?user_id=${userId}`, { method: "POST" }),
@@ -182,6 +222,6 @@ export const api = {
   agentFeedback: (payload: { user_id?: number; message: string; helpful: boolean; preferred_tone: string; confirmed_action?: string; notes?: string }) => request<AgentFeedback>("/agent/feedback", { method: "POST", body: JSON.stringify({ user_id: 1, ...payload }) }),
   proactiveCheck: (userId = 1) => request<Record<string, unknown>>(`/agent/proactive-check/${userId}`, { method: "POST" }),
   alerts: (userId = 1) => request<AgentAlert[]>(`/alerts/${userId}`),
-  diet: (userId = 1) => request<Record<string, string[] | string | number>>(`/care-plan/diet?user_id=${userId}`, { method: "POST" }),
+  diet: (userId = 1) => request<CarePlan>(`/care-plan/diet?user_id=${userId}`, { method: "POST" }),
   familyShare: (token = "demo-family-sarah") => request<Record<string, unknown>>(`/family-shares/${token}`),
 };

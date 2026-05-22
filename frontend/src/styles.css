@@ -366,6 +366,7 @@ textarea { resize: vertical; }
 .agent-evidence p { margin: 0; font-size: 13px; }
 .tool-list { display: flex; flex-wrap: wrap; gap: 7px; }
 .tool-list span { border: 1px solid var(--outline); border-radius: 999px; padding: 5px 9px; background: #fff; color: var(--muted); text-transform: none; letter-spacing: 0; font-size: 12px; font-weight: 700; }
+.tool-list span.forecast-tool-badge { border-color: rgba(79, 70, 229, .28); background: rgba(79, 70, 229, .1); color: #3730a3; }
 .proactive-banner { border: 1px solid #e4a39c; background: var(--error-bg); color: var(--error); border-radius: 8px; padding: 9px 10px; font-weight: 800; font-size: 13px; }
 .chat-compose { display: grid; grid-template-columns: 1fr 44px; gap: 10px; margin-top: 18px; }
 .chat-compose .primary { height: 42px; display: grid; place-items: center; padding: 0; }
@@ -1662,6 +1663,14 @@ button.metric-card {
   min-height: 344px;
 }
 
+.forecast-status { display: grid; gap: 8px; margin-bottom: 10px; }
+.forecast-status p { margin: 0; color: var(--muted); font-size: 13px; }
+.forecast-warning { border-radius: 8px; padding: 10px 12px; font-size: 13px; font-weight: 700; }
+.forecast-warning.danger { background: rgba(220, 38, 38, .09); color: #991b1b; border: 1px solid rgba(220, 38, 38, .18); }
+.forecast-warning.warning { background: rgba(249, 115, 22, .1); color: #9a3412; border: 1px solid rgba(249, 115, 22, .2); }
+.forecast-chart { min-height: 340px; }
+.forecast-actions { display: flex; justify-content: flex-end; margin-top: 10px; }
+
 .next-action-panel {
   display: grid;
   gap: 10px;
@@ -1709,9 +1718,315 @@ button.metric-card {
   color: var(--primary);
 }
 
+.care-plan-page {
+  max-width: 1220px;
+}
+
+.care-plan-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.18fr) minmax(360px, .82fr);
+  gap: 22px;
+  align-items: stretch;
+  margin-bottom: 24px;
+  padding: 28px;
+  border: 1px solid rgba(222, 243, 226, .72);
+  border-radius: 26px;
+  background:
+    radial-gradient(circle at 16% 0%, rgba(210, 255, 189, .28), transparent 42%),
+    linear-gradient(135deg, rgba(255,255,255,.74), rgba(240,247,244,.7));
+  box-shadow: 0 26px 70px rgba(31, 54, 39, .15), inset 0 1px 0 rgba(255,255,255,.82);
+  backdrop-filter: blur(24px);
+}
+
+.care-plan-hero-copy {
+  display: grid;
+  align-content: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.generator-kicker,
+.section-heading span,
+.care-plan-safety {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.generator-kicker,
+.section-heading span {
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.care-plan-hero h2 {
+  color: var(--primary);
+  font-size: clamp(30px, 4vw, 56px);
+  line-height: 1;
+  max-width: 860px;
+}
+
+.care-plan-hero p {
+  max-width: 760px;
+  margin: 0;
+  font-size: 16px;
+}
+
+.care-plan-action-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.care-plan-action-row small {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.generate-plan-button {
+  min-height: 46px;
+  border: 1px solid rgba(21, 69, 57, .28);
+  border-radius: 8px;
+  padding: 0 18px;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  color: #fff;
+  background: var(--primary);
+  cursor: pointer;
+  box-shadow: 0 16px 32px rgba(21, 69, 57, .18);
+}
+
+.generate-plan-button:disabled {
+  cursor: wait;
+  opacity: .78;
+}
+
+.spin-icon {
+  animation: careSpin 800ms linear infinite;
+}
+
+.care-plan-signal-board {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.care-plan-signal-board div {
+  min-height: 112px;
+  border: 1px solid rgba(91, 115, 101, .14);
+  border-radius: 16px;
+  padding: 15px;
+  background: rgba(255,255,255,.56);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.72);
+}
+
+.care-plan-signal-board span,
+.care-plan-panel header span,
+.weekly-action-grid span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.care-plan-signal-board strong {
+  display: block;
+  margin-top: 8px;
+  color: var(--primary);
+  font: 900 24px/1.05 Manrope, Inter, sans-serif;
+  text-transform: capitalize;
+  overflow-wrap: anywhere;
+}
+
+.care-plan-signal-board small {
+  display: block;
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.meal-plan-section,
+.care-plan-panel,
+.care-plan-evidence {
+  border: 1px solid rgba(222, 243, 226, .68);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, .58);
+  box-shadow: 0 18px 48px rgba(31, 54, 39, .1), inset 0 1px 0 rgba(255,255,255,.76);
+  backdrop-filter: blur(20px);
+}
+
+.meal-plan-section,
+.care-plan-evidence {
+  padding: 24px;
+  margin-bottom: 24px;
+}
+
+.section-heading {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 18px;
+}
+
+.section-heading h2,
+.care-plan-panel h2 {
+  color: var(--primary);
+  font-size: 22px;
+}
+
+.section-heading p {
+  margin: 0;
+}
+
+.meal-plan-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.meal-plan-card {
+  display: grid;
+  gap: 16px;
+  min-height: 190px;
+  padding: 18px;
+  border: 1px solid rgba(91, 115, 101, .16);
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(255,255,255,.82), rgba(247,252,245,.72));
+}
+
+.meal-plan-card div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--primary);
+}
+
+.meal-plan-card span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.meal-plan-card p {
+  margin: 0;
+  color: var(--text);
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.care-plan-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+  margin-bottom: 24px;
+}
+
+.care-plan-panel {
+  padding: 20px;
+}
+
+.care-plan-panel header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  color: var(--primary);
+}
+
+.care-plan-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 11px;
+}
+
+.care-plan-list li {
+  display: grid;
+  grid-template-columns: 20px 1fr;
+  gap: 10px;
+  align-items: start;
+  color: var(--text);
+  line-height: 1.45;
+}
+
+.care-plan-list.positive svg {
+  color: var(--primary);
+}
+
+.care-plan-list.caution svg {
+  color: var(--rust);
+}
+
+.weekly-panel {
+  margin-bottom: 24px;
+}
+
+.weekly-action-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.weekly-action-grid div {
+  min-height: 118px;
+  border: 1px solid rgba(91, 115, 101, .14);
+  border-radius: 14px;
+  padding: 14px;
+  background: rgba(247, 252, 245, .7);
+}
+
+.weekly-action-grid p {
+  margin: 8px 0 0;
+  color: var(--text);
+  line-height: 1.45;
+}
+
+.care-plan-evidence .model-evidence-list {
+  margin-top: 4px;
+}
+
+.care-plan-safety {
+  margin: 18px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.care-plan-refreshing {
+  position: sticky;
+  bottom: 18px;
+  width: fit-content;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  padding: 10px 14px;
+  border: 1px solid rgba(21, 69, 57, .22);
+  border-radius: 999px;
+  background: rgba(255,255,255,.86);
+  color: var(--primary);
+  box-shadow: 0 16px 34px rgba(31, 54, 39, .12);
+}
+
 @keyframes pulse {
   0%, 100% { opacity: .45; transform: scale(.9); }
   50% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes careSpin {
+  to { transform: rotate(360deg); }
 }
 
 @keyframes overlayFadeIn {
@@ -1740,6 +2055,11 @@ button.metric-card {
   .page-header h1 { font-size: 20px; line-height: 28px; }
   .stats-grid, .dashboard-grid, .risk-layout, .family-grid, .report-grid, .agent-layout { grid-template-columns: 1fr; gap: 12px; }
   .metric-detail-grid, .model-flow-grid, .monitoring-main-grid, .monitoring-hero-panel { grid-template-columns: 1fr; gap: 12px; }
+  .care-plan-hero, .care-plan-grid, .meal-plan-grid, .weekly-action-grid { grid-template-columns: 1fr; gap: 12px; }
+  .care-plan-hero, .meal-plan-section, .care-plan-evidence { padding: 18px; }
+  .care-plan-hero h2 { font-size: 30px; }
+  .care-plan-signal-board { grid-template-columns: 1fr; }
+  .meal-plan-card { min-height: 136px; }
   .monitoring-hero-stats, .model-evidence-list { grid-template-columns: 1fr; }
   .metric-detail-hero { grid-template-columns: 1fr; padding: 18px; }
   .metric-detail-hero strong { font-size: 32px; }

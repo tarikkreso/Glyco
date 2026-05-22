@@ -213,7 +213,7 @@ If there are too few logs or the artifacts fail to load, the backend falls back 
 
 Glyco’s agent is not a generic chatbot wrapper. It is a tool-grounded clinical support layer.
 
-The main agent workflow:
+The main Gemini agent workflow:
 
 1. load the patient profile
 2. load recent glucose logs
@@ -223,7 +223,7 @@ The main agent workflow:
 6. retrieve guideline snippets
 7. load personalized learning summary
 8. rerank recommendations with Thompson Sampling
-9. generate a safe answer with either an LLM or fallback logic
+9. generate a safe answer after receiving tool results
 
 The agent tool layer can access:
 
@@ -238,7 +238,7 @@ The agent tool layer can access:
 
 The agent also has proactive safety behavior. If the last three fasting glucose readings are all above the configured threshold, Glyco can generate a doctor report and create an alert instead of only replying conversationally.
 
-If Anthropic is configured, the system can use the external LLM path. If not, it uses a local fallback response that still references the same tools and health state.
+The active LLM agent path is Gemini function calling: Gemini receives tool declarations, chooses tool calls, receives tool results, and then writes the final answer. If Gemini is not configured or the loop fails, Glyco falls back to the deterministic local pipeline that runs the same tools in a fixed order. Ollama remains a verbalization fallback, not a tool-calling agent.
 
 ## Agent Learning Loop
 
@@ -371,7 +371,7 @@ If you need to understand the system quickly, start here:
 - `backend/app/db/models.py` for the persistence model
 - `backend/app/ml/inference.py` for artifact loading and feature engineering
 - `backend/app/agent/agent_service.py` for the main agent orchestration
-- `backend/app/agent/anthropic_agent.py` for tool dispatch and fallback chat behavior
+- `backend/app/agent/proactive.py` for sustained glucose anomaly report generation
 - `backend/app/services/assessments.py` for risk and monitoring assessment creation
 - `backend/app/reports/generator.py` for report content generation
 - `frontend/src/App.tsx` for the route map
@@ -424,10 +424,11 @@ The compose file maps the backend to port `8000` and the frontend to port `80`.
 Optional environment variables:
 
 - `DATABASE_URL` to point the backend at a custom database
-- `ANTHROPIC_API_KEY` to enable the external LLM path
-- `ANTHROPIC_MODEL` to override the Anthropic model name
+- `GLYCO_LLM_PROVIDER` to choose `gemini` or `ollama`
+- `GEMINI_API_KEY` or `GLYCO_GEMINI_API_KEY` to enable the Gemini function-calling agent
+- `GLYCO_OLLAMA_URL` and `GLYCO_OLLAMA_MODEL` to enable local Ollama verbalization
 
-If no database URL is provided, Glyco uses a local SQLite file path. If no Anthropic key is provided, the agent uses fallback behavior.
+If no database URL is provided, Glyco uses a local SQLite file path. If no LLM provider is configured, the agent uses fallback behavior.
 
 ## Training The Models
 
@@ -511,7 +512,7 @@ Use the following order of truth:
 
 1. `backend/app/main.py` for startup and app wiring
 2. `backend/app/api/routes.py` for endpoint behavior
-3. `backend/app/agent/agent_service.py` and `backend/app/agent/anthropic_agent.py` for conversational behavior
+3. `backend/app/agent/agent_service.py` for conversational behavior
 4. `backend/app/ml/inference.py` for ML feature contracts and fallback logic
 5. `backend/app/db/models.py` for the persistence schema
 6. `frontend/src/api/client.ts` and `frontend/src/App.tsx` for frontend contracts and routes

@@ -65,12 +65,18 @@ def monitoring_state(logs) -> dict:
     if not glucose:
         return {"trend_label": "watch", "trend_score": 0.5, "anomaly_flags": [], "summary": {"message": "More readings are needed."}}
     avg_glucose = round(mean(glucose), 1)
+    fasting_values = [log.glucose_level for log in recent if log.glucose_level is not None and getattr(log, "is_fasting", True)]
+    post_meal_values = [log.glucose_level for log in recent if log.glucose_level is not None and not getattr(log, "is_fasting", True)]
     variability = round(pstdev(glucose), 1) if len(glucose) > 1 else 0
     slope = round((glucose[-1] - glucose[0]) / max(len(glucose) - 1, 1), 1)
-    high_count = sum(1 for value in glucose if value >= 130)
+    high_count = sum(
+        1
+        for log in recent
+        if log.glucose_level is not None and log.glucose_level >= (130 if getattr(log, "is_fasting", True) else 180)
+    )
     flags = []
     if high_count >= 3:
-        flags.append({"level": "warning", "label": "Repeated elevated glucose readings", "detail": f"{high_count} recent readings were at or above 130 mg/dL."})
+        flags.append({"level": "warning", "label": "Repeated elevated glucose readings", "detail": f"{high_count} recent readings were above the fasting or post-meal threshold for their log type."})
     if slope >= 3:
         flags.append({"level": "danger", "label": "Rising glucose pattern", "detail": f"Recent glucose is rising about {slope} mg/dL per log."})
     if variability >= 25:
@@ -87,10 +93,13 @@ def monitoring_state(logs) -> dict:
         "anomaly_flags": flags,
         "summary": {
             "avg_glucose": avg_glucose,
-            "avg_fasting_glucose": avg_glucose,
+            "avg_fasting_glucose": round(mean(fasting_values), 1) if fasting_values else None,
+            "avg_post_meal_glucose": round(mean(post_meal_values), 1) if post_meal_values else None,
             "variability": variability,
             "slope": slope,
             "logs_analyzed": len(recent),
+            "fasting_logs": len(fasting_values),
+            "post_meal_logs": len(post_meal_values),
             "message": f"Recent monitoring state is {label}.",
         },
     }

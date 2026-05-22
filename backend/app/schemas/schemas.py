@@ -89,6 +89,23 @@ class MonitoringAssessmentOut(BaseModel):
     model_version: str
 
 
+class GlucoseForecastOut(BaseModel):
+    """Public response shape for generated and stored glucose forecasts."""
+
+    user_id: int
+    current_glucose: float
+    predictions: dict[str, float]
+    confidence_intervals: dict[str, dict[str, float]]
+    trend_direction: str
+    predicted_low_alert: bool
+    predicted_high_alert: bool
+    recommendation: str
+    model_version: str
+    used_fallback: bool
+    horizon_minutes: list[int]
+    created_at: datetime | None = None
+
+
 class ReportOut(BaseModel):
     id: int | None = None
     user_id: int

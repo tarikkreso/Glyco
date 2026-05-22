@@ -34,6 +34,7 @@ def _patient_summary(tools_context: dict) -> dict:
         "risk": tools_context.get("risk") or {},
         "bayesian": tools_context.get("bayesian") or {},
         "trend": tools_context.get("trend") or {},
+        "forecast": tools_context.get("forecast"),
         "guidelines": tools_context.get("guidelines") or [],
         "learning": tools_context.get("learning") or {},
         "recommendations": tools_context.get("recommendations") or [],
@@ -48,6 +49,25 @@ def _patient_summary(tools_context: dict) -> dict:
     }
 
 
+def _forecast_block(forecast: dict | None) -> str:
+    """Build the glucose forecast context block shown to configured LLMs."""
+    if forecast is None:
+        return "GLUCOSE FORECAST: Not available yet (insufficient log history)."
+    intervals = forecast["confidence_intervals"]
+    predictions = forecast["predictions"]
+    return f"""GLUCOSE FORECAST (LightGBM, trained on Type 2 CGM data):
+  Current:  {forecast['current_glucose']:.1f} mmol/L
+  +60 min:  {predictions['60']:.1f} mmol/L  [{intervals['60']['low']:.1f}-{intervals['60']['high']:.1f}]
+  +120 min: {predictions['120']:.1f} mmol/L [{intervals['120']['low']:.1f}-{intervals['120']['high']:.1f}]
+  +180 min: {predictions['180']:.1f} mmol/L [{intervals['180']['low']:.1f}-{intervals['180']['high']:.1f}]
+  +240 min: {predictions['240']:.1f} mmol/L [{intervals['240']['low']:.1f}-{intervals['240']['high']:.1f}]
+  Trend: {forecast['trend_direction']}
+  Low alert: {forecast['predicted_low_alert']}
+  High alert: {forecast['predicted_high_alert']}
+  Recommendation: {forecast['recommendation']}
+  Fallback used: {forecast['used_fallback']}"""
+
+
 def _build_concise_prompt(messages: list[dict], tools_context: dict) -> str:
     user_message = next((item["content"] for item in reversed(messages) if item.get("role") == "user"), "")
     summary = _patient_summary(tools_context)
@@ -55,12 +75,15 @@ def _build_concise_prompt(messages: list[dict], tools_context: dict) -> str:
     risk = summary["risk"]
     bayesian = summary["bayesian"]
     trend = summary["trend"]
+    risk_source = "RF risk model" if risk.get("model_version") == "random-forest-0.2" else "risk fallback scorer"
+    trend_source = "glucose trend model" if trend.get("model_version") == "glucose-trend-random-forest-0.2" else "monitoring fallback scorer"
     guidance = "; ".join(item.get("text", "") for item in summary["guidelines"][:2] if item.get("text"))
     learning = summary["learning"]
     next_action = learning.get("next_best_action") or {}
+    forecast_text = _forecast_block(summary["forecast"])
     return f"""You are Glyco, a diabetes support assistant.
 
-Always answer in clear English, even if the user asks in another language.
+Answer in the same language as the user's latest message. If the language is unclear, use clear English.
 Do not diagnose. Do not mention or reveal "tool context". Do not copy raw data.
 Use short, clear sentences. Give 3-5 practical bullets.
 
@@ -69,11 +92,12 @@ User question: {user_message}
 Patient summary:
 - Age: {profile.get("age", "unknown")}
 - BMI: {profile.get("bmi", "unknown")}
-- Trained RF risk model: {risk.get("risk_level", "unknown")} via {risk.get("model_version", "unknown")}
+- {risk_source}: {risk.get("risk_level", "unknown")} via {risk.get("model_version", "unknown")}
 - Bayesian risk posterior: {bayesian.get("posterior_mean", "unknown")}
-- Trained glucose trend model: {trend.get("trend_label", "unknown")} via {trend.get("model_version", "unknown")}
+- {trend_source}: {trend.get("trend_label", "unknown")} via {trend.get("model_version", "unknown")}
 - Recent average glucose: {summary["avg_glucose"] if summary["avg_glucose"] is not None else "unknown"} mg/dL
 - Recent logs loaded: {summary["log_count"]}
+- Forecast context: {forecast_text}
 - Guidance: {guidance or "Keep logging consistently and contact a clinician for medical decisions."}
 - Learned tone: {learning.get("preferred_tone", "balanced")}
 - Learned focus: {learning.get("preferred_action_type", "monitoring")}
@@ -89,22 +113,25 @@ def _build_gemini_prompt(messages: list[dict], tools_context: dict) -> str:
     risk = summary["risk"]
     bayesian = summary["bayesian"]
     trend = summary["trend"]
+    risk_source = "trained RF risk model" if risk.get("model_version") == "random-forest-0.2" else "risk fallback scorer"
+    trend_source = "trained glucose trend model" if trend.get("model_version") == "glucose-trend-random-forest-0.2" else "monitoring fallback scorer"
     top_factors = risk.get("top_factors") or []
     related_flags = risk.get("related_flags") or []
     anomaly_flags = trend.get("anomaly_flags") or []
     guidelines = summary["guidelines"]
     learning = summary["learning"]
     next_action = learning.get("next_best_action") or {}
+    forecast_text = _forecast_block(summary["forecast"])
     factor_lines = "\n".join(f"- {item.get('label', 'Factor')}: {item.get('detail', '')}" for item in top_factors[:4]) or "- No ranked factors available."
     flag_lines = "\n".join(f"- {item.get('label', 'Flag')}: {item.get('detail', '')}" for item in (related_flags + anomaly_flags)[:5]) or "- No additional flags available."
     guidance_lines = "\n".join(f"- {item.get('category', 'Guidance')}: {item.get('text', '')}" for item in guidelines[:4]) or "- Keep logging consistently and contact a clinician for medical decisions."
     return f"""You are Glyco, a careful diabetes risk and monitoring assistant inside a testing MVP.
 
 Core rules:
-- Always answer in clear English, even if the user writes in another language.
+- Answer in the same language as the user's latest message. If the language is unclear, use clear English.
 - Do not diagnose diabetes, prescribe treatment, or replace a clinician.
 - Do not reveal internal tool names, raw JSON, Python dictionaries, or hidden context.
-- The trained Random Forest and glucose trend models already produced the scores below; you only explain them.
+- The risk and monitoring layers already produced the scores below; you only explain them.
 - Ground the answer in the patient summary below. If data is missing, say what is missing.
 - Be practical and specific. Avoid generic wellness filler.
 - Keep the answer readable in the app: use clear section headings and bullets.
@@ -122,12 +149,14 @@ Patient summary:
 - High cholesterol: {profile.get("high_chol", "unknown")}
 - Physical activity marked active: {profile.get("phys_activity", "unknown")}
 - General health rating: {profile.get("general_health", "unknown")}
-- Trained RF risk model version: {risk.get("model_version", "unknown")}
+- Risk source: {risk_source}
+- Risk source version: {risk.get("model_version", "unknown")}
 - RF risk level: {risk.get("risk_level", "unknown")}
 - Risk probability: {risk.get("risk_probability", "unknown")}
 - Bayesian posterior risk mean: {bayesian.get("posterior_mean", "unknown")}
 - Bayesian credible interval: {(bayesian.get("credible_interval") or {}).get("low", "unknown")}-{(bayesian.get("credible_interval") or {}).get("high", "unknown")}
-- Trained glucose trend model version: {trend.get("model_version", "unknown")}
+- Monitoring source: {trend_source}
+- Monitoring source version: {trend.get("model_version", "unknown")}
 - Glucose trend label: {trend.get("trend_label", "unknown")}
 - Trend score: {trend.get("trend_score", "unknown")}
 - Recent log count: {summary["log_count"]}
@@ -141,6 +170,8 @@ Patient summary:
 - Learned action focus: {learning.get("preferred_action_type", "monitoring")}
 - Recent adaptive glucose pattern: {(learning.get("recent_glucose_pattern") or {}).get("label", "unknown")}
 - Adaptive next action: {next_action.get("title", "Keep glucose logging consistent")} - {next_action.get("body", "")}
+
+{forecast_text}
 
 Top factors:
 {factor_lines}
@@ -159,7 +190,7 @@ Bottom line
 What I see
 - Include 3-5 bullets.
 - Mention the risk level, monitoring trend, glucose pattern, and at least one relevant factor or flag.
-- Explicitly say the risk result came from the trained RF model and the trend came from the trained glucose trend model.
+- Explicitly say whether the risk and trend results came from trained models or fallback scorers.
 - Explain that the Bayesian layer smooths risk over time.
 
 Why it matters

@@ -81,8 +81,8 @@ def _build_log_table(recent_logs, palette: dict) -> Table | None:
             bp = f"{log.systolic_bp}/{log.diastolic_bp}"
         rows.append([
             log.log_date.isoformat(),
-            f"{log.fasting_glucose:g}" if log.fasting_glucose is not None else "-",
-            f"{log.post_meal_glucose:g}" if log.post_meal_glucose is not None else "-",
+            f"{log.glucose_level:g}" if getattr(log, "is_fasting", True) and log.glucose_level is not None else "-",
+            f"{log.glucose_level:g}" if not getattr(log, "is_fasting", True) and log.glucose_level is not None else "-",
             str(log.activity_minutes or 0),
             bp,
         ])
@@ -157,8 +157,8 @@ def generate_pdf_report(db: Session, report_id: int) -> Path:
     logs = db.query(models.HealthLog).filter(models.HealthLog.user_id == report.user_id).order_by(models.HealthLog.log_date.asc()).all()
     recent_logs = logs[-7:]
     latest_log = recent_logs[-1] if recent_logs else None
-    fasting_values = [log.fasting_glucose for log in recent_logs if log.fasting_glucose is not None]
-    post_values = [log.post_meal_glucose for log in recent_logs if log.post_meal_glucose is not None]
+    fasting_values = [log.glucose_level for log in recent_logs if log.glucose_level is not None and getattr(log, "is_fasting", True)]
+    post_values = [log.glucose_level for log in recent_logs if log.glucose_level is not None and not getattr(log, "is_fasting", True)]
     activity_values = [float(log.activity_minutes or 0) for log in recent_logs]
     avg_fasting = _avg(fasting_values)
     avg_post = _avg(post_values)
@@ -266,7 +266,7 @@ def generate_pdf_report(db: Session, report_id: int) -> Path:
     elif report.report_type == "family":
         metrics = [
             ["Avg fasting", f"{avg_fasting} mg/dL" if avg_fasting is not None else "n/a"],
-            ["Latest fasting", f"{latest_log.fasting_glucose} mg/dL" if latest_log and latest_log.fasting_glucose is not None else "n/a"],
+            ["Latest reading", f"{latest_log.glucose_level} mg/dL" if latest_log and latest_log.glucose_level is not None else "n/a"],
             ["Avg activity", f"{avg_activity} min/day" if avg_activity is not None else "n/a"],
         ]
         story.extend([Spacer(1, 12), Paragraph("KEY NUMBERS", section_title_style), _build_metrics_table(metrics, palette)])

@@ -87,11 +87,27 @@ export function Agent() {
   const chatHistory = useMemo(() => chatSession.messages.filter((message) => message.role === "user"), [chatSession.messages]);
   const llmLabel = latestResponse ? `${latestResponse.llm_mode}: ${latestResponse.llm_model}` : "fallback";
   const learning = latestResponse?.learning_summary;
-  const evidenceLabels = (response: AgentChatResponse) => (
-    response.tool_calls.length
-      ? response.tool_calls.map((tool) => `${tool.label ?? tool.name}: ${tool.result_summary ?? tool.status}`)
-      : (response.tools_used ?? []).map((name) => `${name}: used`)
-  );
+  const evidenceItems = (response: AgentChatResponse) => {
+    const calls = response.tool_calls.length
+      ? response.tool_calls.map((tool) => {
+          const forecast = tool.name === "forecast_context" || tool.name === "get_glucose_forecast";
+          const details = tool.details ?? {};
+          const trend = typeof details.trend_direction === "string" ? details.trend_direction : "unknown";
+          const highAlert = typeof details.predicted_high_alert === "boolean" ? details.predicted_high_alert : false;
+          const lowAlert = typeof details.predicted_low_alert === "boolean" ? details.predicted_low_alert : false;
+          return {
+            label: forecast ? "Forecast" : `${tool.label ?? tool.name}: ${tool.result_summary ?? tool.status}`,
+            forecast,
+            title: forecast ? `Trend: ${trend} | High alert: ${highAlert} | Low alert: ${lowAlert}` : undefined,
+          };
+        })
+      : (response.tools_used ?? []).map((name) => ({
+          label: name === "forecast_context" || name === "get_glucose_forecast" ? "Forecast" : `${name}: used`,
+          forecast: name === "forecast_context" || name === "get_glucose_forecast",
+          title: name === "forecast_context" || name === "get_glucose_forecast" ? "Trend: available | High alert: see forecast" : undefined,
+        }));
+    return calls;
+  };
   const chat = useMutation({
     mutationFn: (message: string) => api.agentChat(message),
     onSuccess: (response, message) => {
@@ -121,7 +137,7 @@ export function Agent() {
   };
   return (
     <div className="page agent-page frosty-agent-page">
-      <PageHeader title="Glyco Chat" subtitle="Ask natural-language questions while Glyco runs your trained RF risk model, trained glucose trend model, Bayesian layer, and adaptive recommendation ranker." meta={`Mode: ${llmLabel}`} />
+      <PageHeader title="Glyco Chat" subtitle="Ask natural-language questions while Glyco runs the active risk scorer, monitoring scorer, Bayesian layer, and adaptive recommendation ranker." meta={`Mode: ${llmLabel}`} />
       <div className="agent-layout">
         <Card title="Glyco Agent" action={<div className="agent-card-actions"><button type="button" className="secondary history-toggle" onClick={() => setHistoryOpen((value) => !value)}><History size={15} /> History</button><Badge>{llmLabel}</Badge></div>}>
           <div className="agent-ambient-mark" aria-hidden="true">
@@ -159,7 +175,7 @@ export function Agent() {
                     {message.response.proactive_alert && <div className="proactive-banner">Proactive alert generated from recent glucose readings.</div>}
                     <strong>Tools used</strong>
                     <div className="tool-list">
-                      {evidenceLabels(message.response).map((label) => <span key={label}>{label}</span>)}
+                      {evidenceItems(message.response).map((item, itemIndex) => <span className={item.forecast ? "forecast-tool-badge" : undefined} key={`${item.label}-${itemIndex}`} title={item.title}>{item.label}</span>)}
                     </div>
                     <strong>Learning signal</strong>
                     <p>{message.response.learning_summary.adaptation_note}</p>

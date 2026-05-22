@@ -3,11 +3,13 @@ from __future__ import annotations
 from statistics import mean
 from sqlalchemy.orm import Session
 
+from app.agent.agentic_loop import run_gemini_agentic_chat
 from app.agent.bandit import RecommendationBandit, default_recommendations
 from app.agent.llm_client import get_llm_client, get_llm_status
 from app.agent.safety import safety_note, urgent_message_if_needed
 from app.agent.tools import get_logs, get_profile, retrieve_guideline_snippets, run_risk_check, run_trend_check
 from app.db import models
+from app.ml.forecast_inference import get_forecast_service
 from app.services.bayesian import get_or_create_bayesian_state, serialize_bayesian_state
 
 
@@ -16,6 +18,11 @@ ACTION_KEYWORDS = {
     "activity": {"walk", "walking", "activity", "exercise", "movement", "steps"},
     "monitoring": {"log", "logging", "reading", "glucose", "track", "monitoring", "fasting"},
     "medication_check": {"medication", "medicine", "dose", "doctor", "clinician", "clinic"},
+    "clinician_questions": {"question", "questions", "ask", "appointment", "doctor", "clinician"},
+    "fasting_routine": {"fasting", "morning", "routine", "before", "breakfast"},
+    "post_meal_review": {"post", "meal", "after", "lunch", "dinner", "portion"},
+    "sleep_stress": {"sleep", "stress", "illness", "sick", "schedule"},
+    "family_support": {"family", "caregiver", "support", "remind", "help"},
 }
 
 
@@ -58,10 +65,10 @@ def _default_action_for_pattern(pattern: dict) -> str:
     if pattern["label"] == "no-data":
         return "monitoring"
     if pattern["high_count"] >= 3:
-        return "nutrition"
+        return "post_meal_review"
     if pattern["slope"] and pattern["slope"] >= 15:
         return "activity"
-    return "monitoring"
+    return "fasting_routine"
 
 
 def _learning_summary(db: Session, user_id: int) -> dict:
@@ -152,6 +159,122 @@ def _tool_call(name: str, label: str, summary: str, **extra: object) -> dict:
     return {"name": name, "label": label, "status": "ok", "result_summary": summary, **extra}
 
 
+def _as_mmol(value: float) -> float:
+    """Convert legacy mg/dL readings to mmol/L for forecast context."""
+    return float(value) / 18.015 if float(value) > 40 else float(value)
+
+
+def _forecast_row_to_dict(row: models.GlucoseForecast) -> dict:
+    """Serialize a stored forecast row into the standard forecast context shape."""
+    return {
+        "user_id": row.user_id,
+        "current_glucose": row.current_glucose,
+        "predictions": {
+            "60": row.prediction_60min,
+            "120": row.prediction_120min,
+            "180": row.prediction_180min,
+            "240": row.prediction_240min,
+        },
+        "confidence_intervals": {
+            "60": {"low": row.ci_60_low, "high": row.ci_60_high},
+            "120": {"low": row.ci_120_low, "high": row.ci_120_high},
+            "180": {"low": row.ci_180_low, "high": row.ci_180_high},
+            "240": {"low": row.ci_240_low, "high": row.ci_240_high},
+        },
+        "trend_direction": row.trend_direction,
+        "predicted_low_alert": row.predicted_low_alert,
+        "predicted_high_alert": row.predicted_high_alert,
+        "recommendation": row.recommendation,
+        "model_version": row.model_version,
+        "used_fallback": row.used_fallback,
+        "horizon_minutes": [60, 120, 180, 240],
+        "created_at": row.created_at,
+    }
+
+
+def _forecast_logs(db: Session, user_id: int) -> list[dict]:
+    """Load recent health logs for forecast context construction."""
+    rows = (
+        db.query(models.HealthLog)
+        .filter(models.HealthLog.user_id == user_id)
+        .order_by(models.HealthLog.created_at.desc(), models.HealthLog.log_date.desc())
+        .limit(48)
+        .all()
+    )
+    return [
+        {"timestamp": row.created_at or row.log_date, "glucose_mmol": _as_mmol(row.glucose_level)}
+        for row in reversed(rows)
+        if row.glucose_level is not None
+    ]
+
+
+def _save_forecast_context(db: Session, result: dict) -> models.GlucoseForecast:
+    """Persist a freshly generated forecast for agent context reuse."""
+    predictions = result["predictions"]
+    intervals = result["confidence_intervals"]
+    row = models.GlucoseForecast(
+        user_id=result["user_id"],
+        current_glucose=result["current_glucose"],
+        prediction_60min=predictions["60"],
+        prediction_120min=predictions["120"],
+        prediction_180min=predictions["180"],
+        prediction_240min=predictions["240"],
+        ci_60_low=intervals["60"]["low"],
+        ci_60_high=intervals["60"]["high"],
+        ci_120_low=intervals["120"]["low"],
+        ci_120_high=intervals["120"]["high"],
+        ci_180_low=intervals["180"]["low"],
+        ci_180_high=intervals["180"]["high"],
+        ci_240_low=intervals["240"]["low"],
+        ci_240_high=intervals["240"]["high"],
+        trend_direction=result["trend_direction"],
+        predicted_low_alert=result["predicted_low_alert"],
+        predicted_high_alert=result["predicted_high_alert"],
+        recommendation=result["recommendation"],
+        model_version=result["model_version"],
+        used_fallback=result["used_fallback"],
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def _load_forecast_context_sync(user_id: int, db: Session) -> dict | None:
+    """Load or synchronously create the latest forecast context for this user."""
+    row = (
+        db.query(models.GlucoseForecast)
+        .filter(models.GlucoseForecast.user_id == user_id)
+        .order_by(models.GlucoseForecast.created_at.desc())
+        .first()
+    )
+    if row:
+        return _forecast_row_to_dict(row)
+    logs = _forecast_logs(db, user_id)
+    if len(logs) < 4:
+        return None
+    result = get_forecast_service().predict(user_id, logs)
+    return _forecast_row_to_dict(_save_forecast_context(db, result))
+
+
+async def _load_forecast_context(user_id: int, db: Session) -> dict | None:
+    """
+    Load the latest glucose forecast for this user.
+    If no forecast exists yet but there are enough logs,
+    trigger a new forecast synchronously before returning.
+    Returns None if there are fewer than 4 logs.
+    """
+    return _load_forecast_context_sync(user_id, db)
+
+
+def _risk_tool_label(model_version: str) -> str:
+    return "Trained RF risk model" if model_version == "random-forest-0.2" else "Risk fallback scorer"
+
+
+def _trend_tool_label(model_version: str) -> str:
+    return "Trained glucose trend model" if model_version == "glucose-trend-random-forest-0.2" else "Monitoring fallback scorer"
+
+
 def build_agent_tool_pipeline(db: Session, user_id: int, message: str) -> dict:
     """Run the complete Glyco agent tool pipeline before response generation."""
     profile = get_profile(db, user_id)
@@ -161,7 +284,8 @@ def build_agent_tool_pipeline(db: Session, user_id: int, message: str) -> dict:
     trend = run_trend_check(db, user_id)
     snippets = retrieve_guideline_snippets(message)
     learning = _learning_summary(db, user_id)
-    recommendations = RecommendationBandit(db, user_id).rerank(default_recommendations(), limit=3)
+    forecast = _load_forecast_context_sync(user_id, db)
+    recommendations = RecommendationBandit(db, user_id).rerank(default_recommendations(), limit=3, forecast=forecast)
     risk_version = risk.get("model_version", "unavailable")
     trend_version = trend.get("model_version", "unavailable")
     posterior = bayesian.get("posterior_mean")
@@ -172,7 +296,7 @@ def build_agent_tool_pipeline(db: Session, user_id: int, message: str) -> dict:
         _tool_call("get_glucose_logs", "Glucose log reader", f"Loaded {len(logs)} glucose readings from the recent window"),
         _tool_call(
             "run_trained_risk_model",
-            "Trained RF risk model",
+            _risk_tool_label(risk_version),
             f"{risk.get('risk_level', 'unknown')} risk via {risk_version}",
             model_version=risk_version,
             details={"risk_probability": risk.get("risk_probability")},
@@ -185,13 +309,25 @@ def build_agent_tool_pipeline(db: Session, user_id: int, message: str) -> dict:
         ),
         _tool_call(
             "run_trained_glucose_trend_model",
-            "Trained glucose trend model",
+            _trend_tool_label(trend_version),
             f"{trend.get('trend_label', 'unknown')} via {trend_version}",
             model_version=trend_version,
             details={"trend_score": trend.get("trend_score")},
         ),
         _tool_call("retrieve_guidelines", "Guidance retrieval", f"{len(snippets)} curated snippets"),
         _tool_call("read_agent_learning_memory", "Agent learning memory", learning["adaptation_note"], details=learning),
+        *(
+            [
+                _tool_call(
+                    "forecast_context",
+                    "Forecast",
+                    f"{forecast['trend_direction']} forecast via {forecast['model_version']}",
+                    details=forecast,
+                )
+            ]
+            if forecast is not None
+            else []
+        ),
         _tool_call(
             "rank_recommendations_with_thompson_sampling",
             "Adaptive recommendation ranker",
@@ -207,12 +343,13 @@ def build_agent_tool_pipeline(db: Session, user_id: int, message: str) -> dict:
         "trend": trend,
         "guidelines": snippets,
         "learning": learning,
+        "forecast": forecast,
         "recommendations": recommendations,
         "tool_calls": tool_calls,
     }
 
 
-def _fallback_answer(message: str, risk: dict, trend: dict, bayesian: dict, logs: list[dict], snippets: list[dict], urgent: str | None, learning: dict) -> str:
+def _fallback_answer(message: str, risk: dict, trend: dict, bayesian: dict, logs: list[dict], snippets: list[dict], urgent: str | None, learning: dict, forecast: dict | None = None) -> str:
     if urgent:
         return urgent
     local_language = any(term in message.lower() for term in {"trebam", "brinuti", "sta", "doktor", "porodica", "sedmic", "tjedan"})
@@ -222,17 +359,27 @@ def _fallback_answer(message: str, risk: dict, trend: dict, bayesian: dict, logs
     risk_version = risk.get("model_version", "unavailable")
     trend_label = trend.get("trend_label", "unknown")
     trend_version = trend.get("model_version", "unavailable")
+    risk_source = "RF risk model" if risk_version == "random-forest-0.2" else "risk fallback scorer"
+    trend_source = "glucose trend model" if trend_version == "glucose-trend-random-forest-0.2" else "monitoring fallback scorer"
     posterior = bayesian.get("posterior_mean")
     posterior_text = f"{posterior:.2f}" if isinstance(posterior, (int, float)) else "unknown"
     preferred_tone = learning.get("preferred_tone", "balanced")
     confirmed_actions = learning.get("confirmed_actions", [])
     next_action = learning.get("next_best_action") or {}
     pattern = learning.get("recent_glucose_pattern") or {}
+    forecast_sentence = ""
+    if forecast:
+        forecast_sentence = (
+            f" Forecast estimate: {forecast['trend_direction']} over the next 4 hours, "
+            f"with +60 min around {forecast['predictions']['60']} mmol/L; forecasts are estimates."
+        )
     if local_language:
-        parts = [f"Tvoj trenirani glucose trend model ({trend_version}) trenutno vidi obrazac kao {trend_label}. RF risk model ({risk_version}) procjenjuje {risk_level} rizik."]
+        parts = [f"Tvoj {trend_source} ({trend_version}) trenutno vidi obrazac kao {trend_label}. {risk_source} ({risk_version}) procjenjuje {risk_level} rizik."]
         parts.append(f"Bayesian layer izgladjuje taj risk signal kroz vrijeme; trenutni posterior je {posterior_text}.")
         if avg is not None:
             parts.append(f"Prosjek zadnjih glucose ocitanja u vidljivom periodu je {avg} mg/dL.")
+        if forecast_sentence:
+            parts.append(forecast_sentence)
         if trend_label in {"watch", "concerning"} or risk_level == "high":
             parts.append("Ove sedmice vrijedi obratiti paznju: nastavi unositi ocitanja, pogledaj zadnje obroke/aktivnost i pripremi doctor summary ako povisene vrijednosti potraju.")
         else:
@@ -246,10 +393,12 @@ def _fallback_answer(message: str, risk: dict, trend: dict, bayesian: dict, logs
         if preferred_tone != "balanced":
             parts.append(f"Odgovor je prilagodjen tvom feedbacku: stil {preferred_tone}.")
     else:
-        parts = [f"Your trained glucose trend model ({trend_version}) currently sees this as {trend_label}. The RF risk model ({risk_version}) estimates {risk_level} risk."]
+        parts = [f"Your {trend_source} ({trend_version}) currently sees this as {trend_label}. The {risk_source} ({risk_version}) estimates {risk_level} risk."]
         parts.append(f"The Bayesian layer smooths the RF risk signal over time; the current posterior is {posterior_text}.")
         if avg is not None:
             parts.append(f"Your recent average glucose over the visible log window is {avg} mg/dL.")
+        if forecast_sentence:
+            parts.append(forecast_sentence)
         if trend_label in {"watch", "concerning"} or risk_level == "high":
             parts.append("This is worth paying attention to this week: keep logging, review recent meals, and prepare a doctor summary if elevated readings continue.")
         else:
@@ -287,6 +436,33 @@ def chat_with_agent(db: Session, user_id: int, message: str) -> dict:
     """Build an agent response from trained-model tools and adaptive memory."""
     user = db.get(models.User, user_id)
     urgent = urgent_message_if_needed(message)
+    if not urgent:
+        agentic = run_gemini_agentic_chat(db, user_id, message)
+        if agentic and not _is_low_quality_llm_answer(agentic.get("answer")):
+            context = agentic["context"]
+            forecast = _load_forecast_context_sync(user_id, db)
+            if forecast is not None:
+                context["forecast"] = forecast
+                agentic["tool_calls"].append(
+                    _tool_call(
+                        "forecast_context",
+                        "Forecast",
+                        f"{forecast['trend_direction']} forecast via {forecast['model_version']}",
+                        details=forecast,
+                    )
+                )
+            return {
+                "answer": agentic["answer"],
+                "tool_calls": agentic["tool_calls"],
+                "guideline_snippets": context["guidelines"],
+                "safety_note": safety_note(),
+                "patient_name": user.full_name if user else "Demo patient",
+                "llm_mode": agentic["llm_mode"],
+                "llm_model": agentic["llm_model"],
+                "learning_summary": context["learning"],
+                "recommendations": context["recommendations"],
+            }
+
     tools_context = build_agent_tool_pipeline(db, user_id, message)
     messages = [
         {"role": "system", "content": "You are Glyco, a careful diabetes risk and monitoring assistant. Do not diagnose. Use the tool context and adapt to the user's saved feedback."},
@@ -305,6 +481,7 @@ def chat_with_agent(db: Session, user_id: int, message: str) -> dict:
         tools_context["guidelines"],
         urgent,
         tools_context["learning"],
+        tools_context["forecast"],
     )
     llm_status = get_llm_status()
     llm_provider = getattr(llm_client, "provider_name", "configured") if llm_answer else "fallback"

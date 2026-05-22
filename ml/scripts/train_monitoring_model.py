@@ -28,6 +28,15 @@ MEAL_CODES = {66, 67, 68}
 EXERCISE_CODES = {69, 70, 71}
 
 
+def is_lfs_pointer(path: Path) -> bool:
+    if not path.exists() or path.stat().st_size > 1024:
+        return False
+    try:
+        return path.read_text(encoding="utf-8").startswith("version https://git-lfs.github.com/spec/v1")
+    except UnicodeDecodeError:
+        return False
+
+
 def ensure_extracted() -> None:
     RAW_DIR.mkdir(parents=True, exist_ok=True)
     if DATA_DIR.exists():
@@ -70,14 +79,14 @@ def load_events() -> pd.DataFrame:
 def load_prepared_split() -> tuple[pd.DataFrame, pd.DataFrame] | None:
     train_path = PROCESSED / "trend_train.csv.gz"
     test_path = PROCESSED / "trend_test.csv.gz"
-    if not train_path.exists() or not test_path.exists():
+    if not train_path.exists() or not test_path.exists() or is_lfs_pointer(train_path) or is_lfs_pointer(test_path):
         return None
     return pd.read_csv(train_path), pd.read_csv(test_path)
 
 
 def load_dataset_summary() -> dict | None:
     summary_path = PROCESSED / "trend_dataset_summary.json"
-    if not summary_path.exists():
+    if not summary_path.exists() or is_lfs_pointer(summary_path):
         return None
     return json.loads(summary_path.read_text(encoding="utf-8"))
 

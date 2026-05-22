@@ -11,7 +11,7 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 from app.db.database import SessionLocal
 from app.db import models
 from app.main import app
-from app.ml.inference import _load_risk_bundle, _load_trend_bundle, predict_monitoring
+from app.ml.inference import ARTIFACTS, _is_lfs_pointer, _load_risk_bundle, _load_trend_bundle, predict_monitoring
 from app.rules.engine import calculate_bmi
 
 
@@ -21,6 +21,8 @@ class GlycoApiTests(unittest.TestCase):
         cls.client = TestClient(app)
 
     def test_model_artifacts_load(self) -> None:
+        for filename in ("risk_model.joblib", "risk_preprocessor.joblib", "trend_model.joblib", "trend_preprocessor.joblib"):
+            self.assertFalse(_is_lfs_pointer(ARTIFACTS / filename), filename)
         risk = _load_risk_bundle()
         trend = _load_trend_bundle()
         self.assertIn("features", risk["preprocessor"])
@@ -146,6 +148,9 @@ class GlycoApiTests(unittest.TestCase):
             self.assertEqual(risk_count, 0)
             monitoring_count = db.query(models.MonitoringAssessment).filter(models.MonitoringAssessment.user_id == user.id).count()
             self.assertGreaterEqual(monitoring_count, 1)
+            monitoring = db.query(models.MonitoringAssessment).filter(models.MonitoringAssessment.user_id == user.id).order_by(models.MonitoringAssessment.created_at.desc()).first()
+            self.assertEqual(monitoring.summary_json["avg_fasting_glucose"], None)
+            self.assertEqual(monitoring.summary_json["avg_post_meal_glucose"], 177)
         finally:
             if user is not None:
                 db.query(models.AgentAlert).filter(models.AgentAlert.user_id == user.id).delete()
@@ -284,6 +289,63 @@ class GlycoApiTests(unittest.TestCase):
         self.assertIn(result["reason"] if not result["created"] else result["title"], {"existing", "Concerning trend detected", "Watch pattern detected"})
         alerts = self.client.get("/api/alerts/1").json()
         self.assertGreaterEqual(len(alerts), 1)
+
+    def test_care_plan_uses_current_patient_data(self) -> None:
+        plan = self.client.post("/api/care-plan/diet?user_id=1").json()
+        self.assertIn(plan["source"], {"data-fallback", "gemini-personalized"})
+        self.assertIn("signals", plan)
+        self.assertEqual(plan["signals"]["risk_model_version"], "random-forest-0.2")
+        self.assertEqual(plan["signals"]["trend_model_version"], "glucose-trend-random-forest-0.2")
+        self.assertIsNotNone(plan["signals"]["latest_glucose"])
+        combined = " ".join(plan["weekly_recommendations"] + [plan["direction"]])
+        self.assertTrue(str(int(plan["signals"]["latest_glucose"])) in combined or plan["signals"]["trend_label"] in combined)
+
+    def test_care_plan_reflects_not_fasting_latest_reading(self) -> None:
+        db = SessionLocal()
+        user = None
+        try:
+            user = models.User(full_name="Care Plan Meal", email_or_demo_id="care-plan-meal")
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+            db.add(models.Profile(
+                user_id=user.id,
+                age=52,
+                sex="Female",
+                height_cm=166,
+                weight_kg=82,
+                bmi=calculate_bmi(82, 166),
+                high_bp=True,
+                high_chol=False,
+                smoker=False,
+                phys_activity=True,
+                fruits=True,
+                veggies=True,
+                general_health=3,
+                stroke_history=False,
+                heart_disease_history=False,
+                difficulty_walking=False,
+                family_history_diabetes=True,
+            ))
+            db.add(models.HealthLog(user_id=user.id, log_date=date.today(), is_fasting=False, fasting_glucose=190, post_meal_glucose=190))
+            db.commit()
+            plan = self.client.post(f"/api/care-plan/diet?user_id={user.id}").json()
+            self.assertFalse(plan["signals"]["latest_is_fasting"])
+            self.assertEqual(plan["signals"]["avg_post_meal"], 190)
+            self.assertIn("not-fasting", plan["direction"])
+        finally:
+            if user is not None:
+                db.query(models.AgentAlert).filter(models.AgentAlert.user_id == user.id).delete()
+                db.query(models.Report).filter(models.Report.user_id == user.id).delete()
+                db.query(models.MonitoringAssessment).filter(models.MonitoringAssessment.user_id == user.id).delete()
+                db.query(models.RiskAssessment).filter(models.RiskAssessment.user_id == user.id).delete()
+                db.query(models.BayesianRiskState).filter(models.BayesianRiskState.user_id == user.id).delete()
+                db.query(models.BanditArmState).filter(models.BanditArmState.user_id == user.id).delete()
+                db.query(models.HealthLog).filter(models.HealthLog.user_id == user.id).delete()
+                db.query(models.Profile).filter(models.Profile.user_id == user.id).delete()
+                db.query(models.User).filter(models.User.id == user.id).delete()
+                db.commit()
+            db.close()
 
 
 if __name__ == "__main__":

@@ -3,7 +3,7 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from app.agent.bandit import RecommendationBandit, default_recommendations
+from app.agent.bandit import RECOMMENDATION_ARMS, RecommendationBandit, default_recommendations
 from app.db import models
 from app.db.database import SessionLocal
 
@@ -17,7 +17,8 @@ def test_thompson_sampling_returns_valid_arm() -> None:
         db.commit()
         db.refresh(user)
         ranked = RecommendationBandit(db, user.id).rerank(default_recommendations(), limit=1)
-        assert ranked[0]["type"] in {"nutrition", "activity", "monitoring", "medication_check"}
+        assert ranked[0]["type"] in RECOMMENDATION_ARMS
+        assert len(default_recommendations()) >= 8
     finally:
         db.query(models.BanditArmState).filter(models.BanditArmState.user_id == user.id).delete()
         db.query(models.User).filter(models.User.email_or_demo_id == "bandit-test").delete()

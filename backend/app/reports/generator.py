@@ -12,9 +12,11 @@ def _fmt(value, unit: str = "") -> str:
 def build_report(report_type: str, user, risk, monitoring, logs) -> dict:
     latest_log = logs[-1] if logs else None
     name = user.full_name if user else "Demo patient"
-    fasting_values = [log.fasting_glucose for log in logs if log.fasting_glucose is not None]
+    fasting_values = [log.glucose_level for log in logs if log.glucose_level is not None and getattr(log, "is_fasting", True)]
+    post_meal_values = [log.glucose_level for log in logs if log.glucose_level is not None and not getattr(log, "is_fasting", True)]
     activity_values = [log.activity_minutes for log in logs if log.activity_minutes is not None]
     avg_fasting = round(mean(fasting_values), 1) if fasting_values else None
+    avg_post_meal = round(mean(post_meal_values), 1) if post_meal_values else None
     avg_activity = round(mean(activity_values), 1) if activity_values else None
     fasting_min = min(fasting_values) if fasting_values else None
     fasting_max = max(fasting_values) if fasting_values else None
@@ -34,7 +36,7 @@ def build_report(report_type: str, user, risk, monitoring, logs) -> dict:
             {"title": "Patient Overview", "body": f"{name} is using Glyco for diabetes risk screening and monitoring support."},
             {"title": "Risk Profile", "body": risk_text},
             {"title": "Monitoring Trend", "body": f"Recent trend status: {monitor_text}."},
-            {"title": "Glucose Summary", "body": f"Average fasting glucose: {_fmt(avg_fasting, ' mg/dL')}. Range: {_fmt(fasting_min, ' mg/dL')} to {_fmt(fasting_max, ' mg/dL')}."},
+            {"title": "Glucose Summary", "body": f"Average fasting glucose: {_fmt(avg_fasting, ' mg/dL')}. Average not-fasting glucose: {_fmt(avg_post_meal, ' mg/dL')}. Fasting range: {_fmt(fasting_min, ' mg/dL')} to {_fmt(fasting_max, ' mg/dL')}."},
             {"title": "Recent Vitals", "body": f"Latest BP: {_fmt(getattr(latest_log, 'systolic_bp', None), ' /')} {_fmt(getattr(latest_log, 'diastolic_bp', None), ' mmHg')}. Avg activity: {_fmt(avg_activity, ' min/day')}."},
         ]
         if risk:
@@ -48,7 +50,7 @@ def build_report(report_type: str, user, risk, monitoring, logs) -> dict:
         sections = [
             {"title": "Overview", "body": f"{name} is tracking health patterns to reduce diabetes risk."},
             {"title": "How Things Look", "body": f"Risk is currently {risk.risk_level if risk else 'unknown'} and the monitoring trend is {monitoring.trend_label if monitoring else 'unknown'}."},
-            {"title": "Recent Readings", "body": f"Average fasting glucose: {_fmt(avg_fasting, ' mg/dL')}. Latest: {_fmt(getattr(latest_log, 'fasting_glucose', None), ' mg/dL')}."},
+            {"title": "Recent Readings", "body": f"Average fasting glucose: {_fmt(avg_fasting, ' mg/dL')}. Average not-fasting glucose: {_fmt(avg_post_meal, ' mg/dL')}. Latest reading: {_fmt(getattr(latest_log, 'glucose_level', None), ' mg/dL')}."},
             {"title": "How Family Can Help", "body": "Offer reminders to log readings, plan balanced meals, and take short walks after meals."},
             {"title": "Next Check-In", "body": "If readings stay elevated for several days, consider contacting a clinician."},
         ]

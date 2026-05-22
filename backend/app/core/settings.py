@@ -8,8 +8,6 @@ class Settings(BaseSettings):
     """Central application settings loaded from environment variables."""
 
     database_url: str | None = None
-    anthropic_api_key: str | None = None
-    anthropic_model: str = "claude-3-5-sonnet-20240620"
 
     model_config = SettingsConfigDict(env_file=(".env", "backend/.env"), extra="ignore")
 

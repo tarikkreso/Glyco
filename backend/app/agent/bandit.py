@@ -8,7 +8,17 @@ from sqlalchemy.orm import Session
 
 from app.db import models
 
-RECOMMENDATION_ARMS = ("nutrition", "activity", "monitoring", "medication_check")
+RECOMMENDATION_ARMS = (
+    "nutrition",
+    "activity",
+    "monitoring",
+    "medication_check",
+    "clinician_questions",
+    "fasting_routine",
+    "post_meal_review",
+    "sleep_stress",
+    "family_support",
+)
 
 
 @dataclass(frozen=True)
@@ -43,18 +53,26 @@ class RecommendationBandit:
 
     # Samples from each arm's posterior and returns candidates in descending
     # sampled value, which balances exploration and exploitation.
-    def rerank(self, recommendations: list[dict], limit: int | None = None) -> list[dict]:
+    def rerank(self, recommendations: list[dict], limit: int | None = None, forecast: dict | None = None) -> list[dict]:
         """Rank recommendations using Thompson Sampling draws from each arm."""
         states = {
             row.arm_name: row
             for row in self.db.query(models.BanditArmState).filter(models.BanditArmState.user_id == self.user_id).all()
         }
+        alpha_boosts = {"monitoring": 0.0, "activity": 0.0}
+        if forecast and forecast.get("predicted_low_alert"):
+            # Forecast low alert increases monitoring recommendation priority via bandit arm boost.
+            alpha_boosts["monitoring"] += 1.0
+        if forecast and forecast.get("predicted_high_alert"):
+            # Forecast high alert increases activity recommendation priority.
+            alpha_boosts["activity"] += 1.0
         decorated: list[tuple[float, dict]] = []
         for item in recommendations:
             arm = str(item.get("type") or item.get("arm") or "monitoring")
             state = states.get(arm) or states["monitoring"]
-            sampled_score = betavariate(state.alpha, state.beta)
-            ranked = {**item, "type": arm, "bandit_score": sampled_score, "bandit_alpha": state.alpha, "bandit_beta": state.beta}
+            boosted_alpha = state.alpha + alpha_boosts.get(arm, 0.0)
+            sampled_score = betavariate(boosted_alpha, state.beta)
+            ranked = {**item, "type": arm, "bandit_score": sampled_score, "bandit_alpha": boosted_alpha, "bandit_beta": state.beta}
             decorated.append((sampled_score, ranked))
         decorated.sort(key=lambda pair: pair[0], reverse=True)
         ranked_items = [item for _, item in decorated]
@@ -92,4 +110,9 @@ def default_recommendations() -> list[dict]:
         {"type": "activity", "title": "Walk after the largest meal", "body": "Aim for 10 to 15 minutes of light movement after the meal most linked with higher readings."},
         {"type": "monitoring", "title": "Keep glucose logging consistent", "body": "Add the next glucose reading so Glyco can detect whether the pattern is improving."},
         {"type": "medication_check", "title": "Prepare medication questions", "body": "Ask the clinician whether the current monitoring pattern changes medication review timing."},
+        {"type": "clinician_questions", "title": "Write down doctor questions", "body": "Bring one question about targets, one about timing, and one about when to contact the clinic."},
+        {"type": "fasting_routine", "title": "Standardize fasting checks", "body": "Take fasting readings at a similar morning time so week-to-week comparisons are cleaner."},
+        {"type": "post_meal_review", "title": "Review post-meal patterns", "body": "When a not-fasting value is higher, connect it to the previous meal timing and portion."},
+        {"type": "sleep_stress", "title": "Note sleep and stress context", "body": "Add a short note when sleep, stress, illness, or schedule changes might explain a reading."},
+        {"type": "family_support", "title": "Ask family for one practical support", "body": "Choose one small support task, such as logging reminders, walking company, or appointment prep."},
     ]
