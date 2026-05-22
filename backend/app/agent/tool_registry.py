@@ -9,6 +9,7 @@ from app.agent.bandit import RecommendationBandit, default_recommendations
 from app.agent.tools import get_logs, get_profile, retrieve_guideline_snippets, run_risk_check, run_trend_check
 from app.db import models
 from app.ml.forecast_inference import get_forecast_service
+from app.services.forecast_learning import apply_calibration
 from app.services.bayesian import get_or_create_bayesian_state, serialize_bayesian_state
 
 
@@ -156,7 +157,11 @@ def _forecast_logs(db: Session, user_id: int) -> list[dict]:
         .all()
     )
     return [
-        {"timestamp": row.created_at or row.log_date, "glucose_mmol": _as_mmol(row.glucose_level)}
+        {
+            "timestamp": row.created_at or row.log_date,
+            "glucose_mmol": _as_mmol(row.glucose_level),
+            "is_fasting": bool(row.is_fasting),
+        }
         for row in reversed(rows)
         if row.glucose_level is not None
     ]
@@ -290,7 +295,7 @@ def execute_agent_tool(db: Session, user_id: int, name: str, args: dict[str, Any
         )
         return result, call
     if name == "get_glucose_forecast":
-        result = get_forecast_service().predict(user_id, _forecast_logs(db, user_id))
+        result = apply_calibration(db, get_forecast_service().predict(user_id, _forecast_logs(db, user_id)))
         call = _tool_call(
             name,
             "Forecast",
@@ -308,7 +313,7 @@ def execute_agent_tool(db: Session, user_id: int, name: str, args: dict[str, Any
         return result, _tool_call(name, "Agent learning memory", result["adaptation_note"], details=result)
     if name == "rank_recommendations_with_thompson_sampling":
         limit = int(args.get("limit") or 3)
-        forecast = get_forecast_service().predict(user_id, _forecast_logs(db, user_id))
+        forecast = apply_calibration(db, get_forecast_service().predict(user_id, _forecast_logs(db, user_id)))
         result = RecommendationBandit(db, user_id).rerank(default_recommendations(), limit=max(1, min(limit, 4)), forecast=forecast)
         top = result[0] if result else {}
         return result, _tool_call(name, "Adaptive recommendation ranker", top.get("title", "No recommendations"), details={"ranked_recommendations": result})

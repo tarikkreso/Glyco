@@ -10,6 +10,16 @@ class UserOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class UserRegisterIn(BaseModel):
+    full_name: str = Field("Glyco User", min_length=1, max_length=120)
+    email: str = Field(..., min_length=3, max_length=120)
+
+
+class UserUpdateIn(BaseModel):
+    full_name: str = Field("Glyco User", min_length=1, max_length=120)
+    email: str = Field(..., min_length=3, max_length=120)
+
+
 class ProfileIn(BaseModel):
     user_id: int = 1
     age: int = Field(55, ge=18, le=100)
@@ -104,6 +114,9 @@ class GlucoseForecastOut(BaseModel):
     used_fallback: bool
     horizon_minutes: list[int]
     created_at: datetime | None = None
+    calibration_applied: bool = False
+    personal_mae_per_horizon: dict[str, float] | None = None
+    forecast_quality: str | None = None
 
 
 class ReportOut(BaseModel):

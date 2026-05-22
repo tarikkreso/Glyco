@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.db import models
 from app.ml.forecast_inference import get_forecast_service
+from app.services.forecast_learning import apply_calibration
 from app.reports.generator import build_report
 
 
@@ -39,7 +40,7 @@ def _forecast_logs(db: Session, user_id: int) -> list[dict[str, Any]]:
         .all()
     )
     return [
-        {"timestamp": row.created_at or row.log_date, "glucose_mmol": _as_mmol(row.glucose_level)}
+        {"timestamp": row.created_at or row.log_date, "glucose_mmol": _as_mmol(row.glucose_level), "is_fasting": bool(row.is_fasting)}
         for row in reversed(rows)
         if row.glucose_level is not None
     ]
@@ -56,8 +57,23 @@ def detect_sustained_glucose_anomaly_and_report(db: Session, user_id: int) -> di
     )
     if len(logs) < 3 or not all(_as_mmol(row.fasting_glucose) > 7.0 for row in logs):
         return {"proactive_alert": False}
+
+    title = "Sustained elevated fasting glucose"
+    existing = (
+        db.query(models.AgentAlert)
+        .filter(
+            models.AgentAlert.user_id == user_id,
+            models.AgentAlert.title == title,
+            models.AgentAlert.acknowledged_at.is_(None),
+        )
+        .order_by(models.AgentAlert.created_at.desc())
+        .first()
+    )
+    if existing:
+        return {"proactive_alert": False, "reason": "existing", "alert_id": existing.id}
+
     report = create_report_for_agent(db, user_id, "doctor")
-    forecast = get_forecast_service().predict(user_id, _forecast_logs(db, user_id))
+    forecast = apply_calibration(db, get_forecast_service().predict(user_id, _forecast_logs(db, user_id)))
     message = (
         "Glyco detected that the last 3 fasting glucose readings were above 7.0 mmol/L "
         f"and generated a doctor report. Forecast trend: {forecast['trend_direction']}."
@@ -65,7 +81,7 @@ def detect_sustained_glucose_anomaly_and_report(db: Session, user_id: int) -> di
     alert = models.AgentAlert(
         user_id=user_id,
         severity="danger",
-        title="Sustained elevated fasting glucose",
+        title=title,
         message=message,
         recommended_action="Review the generated doctor report and contact your clinician if this pattern persists.",
         source_json={"report": report, "last_three": [row.fasting_glucose for row in reversed(logs)], "forecast": forecast},

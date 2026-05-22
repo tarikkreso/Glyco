@@ -2,12 +2,31 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from statistics import mean
 from typing import Protocol
 
 import httpx
 
 logger = logging.getLogger(__name__)
+GEMINI_COOLDOWN_UNTIL = 0.0
+
+
+def _gemini_cooldown_seconds() -> float:
+    """Return how long Gemini should be skipped after a rate-limit response."""
+    return float(os.getenv("GLYCO_GEMINI_429_COOLDOWN_SECONDS", "120"))
+
+
+def gemini_is_rate_limited() -> bool:
+    """Return whether Gemini calls should be skipped because of a recent 429."""
+    return time.time() < GEMINI_COOLDOWN_UNTIL
+
+
+def note_gemini_rate_limit() -> None:
+    """Record a short Gemini cooldown after Google returns HTTP 429."""
+    global GEMINI_COOLDOWN_UNTIL
+    # A temporary cooldown prevents every dashboard refresh from retrying a known exhausted quota.
+    GEMINI_COOLDOWN_UNTIL = time.time() + _gemini_cooldown_seconds()
 
 
 def _first_env(*names: str) -> str:
@@ -627,6 +646,9 @@ class GeminiClient:
         return (answer or None), candidate.get("finishReason")
 
     def generate(self, messages: list[dict], tools_context: dict) -> str | None:
+        if gemini_is_rate_limited():
+            logger.warning("Gemini generation skipped: rate-limit cooldown is active")
+            return None
         if not self.api_key:
             logger.warning("Gemini generation skipped: GEMINI_API_KEY is not set")
             return None
@@ -645,6 +667,11 @@ Target 220-320 words. End with the Safety note as a complete sentence."""
             if repaired_answer and not _is_probably_incomplete(repaired_answer, repaired_finish_reason):
                 return repaired_answer
             return repaired_answer
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 429:
+                note_gemini_rate_limit()
+            logger.warning("Gemini generation failed: %s", exc)
+            return None
         except Exception as exc:
             logger.warning("Gemini generation failed: %s", exc)
             return None

@@ -1,12 +1,10 @@
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Activity, Brain, ClipboardList, LineChart as LineChartIcon, Target } from "lucide-react";
-import { Area, ComposedChart, Legend, Line, LineChart, ReferenceArea, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { api, type GlucoseForecast } from "../api/client";
+import { Activity, ClipboardList } from "lucide-react";
+import { Area, ComposedChart, Legend, Line, ReferenceArea, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { api, type GlucoseForecast, type MonitoringAssessment } from "../api/client";
+import { useAuth } from "../auth/auth";
 import { Badge, Card, EmptyState, ErrorState, LoadingState, PageHeader } from "../components/ui";
-
-function percent(value?: number) {
-  return typeof value === "number" ? `${Math.round(value * 100)}%` : "-";
-}
 
 function trendTone(label?: string) {
   if (label === "concerning") return "danger";
@@ -25,10 +23,61 @@ function trendBadgeTone(label?: string) {
   return "neutral";
 }
 
-function ForecastChart({ actualLogs, forecast }: { actualLogs: Array<{ timestamp: string; glucose_mmol: number }>; forecast: GlucoseForecast | null }) {
+function titleCase(value?: string) {
+  return value ? value[0].toUpperCase() + value.slice(1) : "";
+}
+
+function forecastHeadline(forecast: GlucoseForecast | null, monitoring?: MonitoringAssessment) {
+  if (forecast?.predicted_low_alert) return "Forecast shows possible low glucose";
+  if (forecast?.predicted_high_alert) return "Forecast shows possible high glucose";
+  if (forecast?.trend_direction === "rising") return "Glucose may rise soon";
+  if (forecast?.trend_direction === "falling") return "Glucose may fall soon";
+  if (forecast?.trend_direction === "stable") return "Glucose forecast looks stable";
+  if (monitoring?.trend_label === "concerning") return "This week needs attention";
+  if (monitoring?.trend_label === "watch") return "Watch the next few readings";
+  return "Pattern looks steadier";
+}
+
+function forecastSummary(forecast: GlucoseForecast | null, monitoring?: MonitoringAssessment) {
+  if (forecast) {
+    if (forecast.predicted_low_alert || forecast.predicted_high_alert) return forecast.recommendation;
+    return `Forecast estimates ${forecast.trend_direction} glucose over the next 4 hours, with +60 min around ${forecast.predictions["60"]} mmol/L. Forecasts are estimates.`;
+  }
+  return String(monitoring?.summary.message ?? "Glyco is waiting for enough glucose logs to describe the trend.");
+}
+
+function nextCheckText(forecast: GlucoseForecast | null) {
+  if (!forecast) return "Add a few readings, then refresh the forecast.";
+  if (forecast.predicted_low_alert || forecast.predicted_high_alert) return "Check again soon and follow your care plan if symptoms or repeated out-of-range readings appear.";
+  if (forecast.trend_direction === "rising" || forecast.trend_direction === "falling") return "Check again within the next 60 to 120 minutes to confirm the forecast direction.";
+  return "Continue usual monitoring and refresh after your next reading.";
+}
+
+function ForecastActualDot(props: { cx?: number; cy?: number; payload?: { is_fasting?: boolean } }) {
+  const { cx, cy, payload } = props;
+  if (typeof cx !== "number" || typeof cy !== "number") return null;
+  return <circle cx={cx} cy={cy} r={4} fill={payload?.is_fasting ? "#154539" : "#c2572b"} stroke="#fff" strokeWidth={2} />;
+}
+
+function ForecastTooltip({ active, label, payload }: { active?: boolean; label?: number; payload?: Array<{ dataKey?: string; value?: number; payload?: { is_fasting?: boolean; actual?: number; forecast?: number; forecastBand?: [number, number] } }> }) {
+  if (!active || !payload?.length) return null;
+  const point = payload.find((item) => item.payload?.actual != null || item.payload?.forecast != null)?.payload;
+  if (!point) return null;
+  return (
+    <div className="forecast-tooltip">
+      <strong>{label ? new Date(Number(label)).toLocaleString() : "Reading"}</strong>
+      {point.actual != null && <span>Actual: {point.actual} mmol/L ({point.is_fasting ? "fasting" : "not fasting"})</span>}
+      {point.forecast != null && <span>Forecast: {point.forecast} mmol/L</span>}
+      {point.forecastBand && <span>Confidence: {point.forecastBand[0]}-{point.forecastBand[1]} mmol/L</span>}
+    </div>
+  );
+}
+
+function ForecastChart({ actualLogs, forecast, monitoring, userId }: { actualLogs: Array<{ timestamp: string; glucose_mmol: number; is_fasting: boolean }>; forecast: GlucoseForecast | null; monitoring?: MonitoringAssessment; userId: number }) {
   const queryClient = useQueryClient();
+  const [historyHours, setHistoryHours] = useState<8 | 24 | 48 | "all">(24);
   const refreshForecast = useMutation({
-    mutationFn: () => api.triggerForecast(),
+    mutationFn: () => api.triggerForecast(userId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["forecast"] });
       queryClient.invalidateQueries({ queryKey: ["alerts"] });
@@ -37,12 +86,14 @@ function ForecastChart({ actualLogs, forecast }: { actualLogs: Array<{ timestamp
   });
   const sortedLogs = [...actualLogs].sort((left, right) => new Date(left.timestamp).getTime() - new Date(right.timestamp).getTime());
   const lastActualTime = sortedLogs.length ? new Date(sortedLogs[sortedLogs.length - 1].timestamp).getTime() : Date.now();
-  const eightHoursAgo = lastActualTime - 8 * 60 * 60 * 1000;
+  const firstActualTime = sortedLogs.length ? new Date(sortedLogs[0].timestamp).getTime() : lastActualTime - 24 * 60 * 60 * 1000;
+  const historyStartTime = historyHours === "all" ? firstActualTime : lastActualTime - historyHours * 60 * 60 * 1000;
   const actualPoints = sortedLogs
-    .filter((log) => new Date(log.timestamp).getTime() >= eightHoursAgo)
+    .filter((log) => new Date(log.timestamp).getTime() >= historyStartTime)
     .map((log) => ({
       time: new Date(log.timestamp).getTime(),
       actual: Number(log.glucose_mmol.toFixed(2)),
+      is_fasting: log.is_fasting,
       forecast: null,
       forecastBand: null,
     }));
@@ -52,33 +103,42 @@ function ForecastChart({ actualLogs, forecast }: { actualLogs: Array<{ timestamp
         return {
           time: lastActualTime + minutes * 60 * 1000,
           actual: null,
+          is_fasting: null,
           forecast: forecast.predictions[key],
           forecastBand: [forecast.confidence_intervals[key].low, forecast.confidence_intervals[key].high],
         };
       })
     : [];
   const chartData = [...actualPoints, ...forecastPoints].sort((left, right) => left.time - right.time);
-  const trendLabel = forecast?.trend_direction ? forecast.trend_direction[0].toUpperCase() + forecast.trend_direction.slice(1) : "";
+  const trendLabel = titleCase(forecast?.trend_direction);
+  const historicalTrend = titleCase(monitoring?.trend_label);
 
   return (
     <Card title="Glucose Forecast" action={forecast ? <Badge tone={trendBadgeTone(forecast.trend_direction)}>{trendLabel}</Badge> : <Badge>Forecast</Badge>}>
       <div className="forecast-status">
         {!forecast && <p>Add more readings to enable glucose forecasting</p>}
-        {forecast?.predicted_low_alert && <div className="forecast-warning danger">{forecast.recommendation}</div>}
-        {forecast?.predicted_high_alert && <div className="forecast-warning warning">{forecast.recommendation}</div>}
+        {forecast && <p>{forecast.used_fallback ? "Fallback forecast" : "Model forecast"} - {forecast.model_version}</p>}
+
+        <div className="forecast-range-controls" role="group" aria-label="Actual glucose history shown in forecast chart">
+          {([8, 24, 48, "all"] as const).map((range) => (
+            <button key={range} type="button" className={historyHours === range ? "active" : ""} onClick={() => setHistoryHours(range)}>
+              {range === "all" ? "All" : `${range}h`}
+            </button>
+          ))}
+        </div>
       </div>
       <div className="chart-box monitoring-chart forecast-chart">
         <ResponsiveContainer width="100%" height={340}>
           <ComposedChart data={chartData}>
             <XAxis
               dataKey="time"
-              domain={[eightHoursAgo, lastActualTime + 4 * 60 * 60 * 1000]}
+              domain={[historyStartTime, lastActualTime + 4 * 60 * 60 * 1000]}
               tick={{ fontSize: 11 }}
               tickFormatter={(value) => new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
               type="number"
             />
             <YAxis domain={[2, 16]} tick={{ fontSize: 11 }} />
-            <Tooltip labelFormatter={(value) => new Date(Number(value)).toLocaleString()} />
+            <Tooltip content={<ForecastTooltip />} />
             <Legend payload={[
               { value: "Actual", type: "line", color: "#154539" },
               { value: "Forecast", type: "line", color: "#4f46e5" },
@@ -88,12 +148,16 @@ function ForecastChart({ actualLogs, forecast }: { actualLogs: Array<{ timestamp
             <ReferenceArea y1={10} y2={16} fill="#f97316" fillOpacity={0.08} />
             <ReferenceLine x={Date.now()} stroke="#6b7280" strokeDasharray="4 4" />
             <Area dataKey="forecastBand" stroke="none" fill="#4f46e5" fillOpacity={0.15} connectNulls />
-            <Line name="Actual" dataKey="actual" stroke="#154539" strokeWidth={3} dot={{ r: 3 }} connectNulls={false} />
+            <Line name="Actual" dataKey="actual" stroke="#154539" strokeWidth={3} dot={<ForecastActualDot />} connectNulls={false} />
             <Line name="Forecast" dataKey="forecast" stroke="#4f46e5" strokeWidth={3} strokeDasharray="7 5" dot={{ r: 4 }} connectNulls />
           </ComposedChart>
         </ResponsiveContainer>
       </div>
       <div className="forecast-actions">
+        <div className="forecast-model-evidence">
+          <span>Forecast model: {forecast?.model_version ?? "Waiting for forecast"}</span>
+          <span>Trend support: {monitoring?.model_version ?? "Loading trend model"}</span>
+        </div>
         <button type="button" className="secondary" disabled={refreshForecast.isPending} onClick={() => refreshForecast.mutate()}>
           Refresh Forecast
         </button>
@@ -103,154 +167,89 @@ function ForecastChart({ actualLogs, forecast }: { actualLogs: Array<{ timestamp
 }
 
 export function Monitoring() {
-  const logs = useQuery({ queryKey: ["logs"], queryFn: () => api.logs() });
-  const monitoring = useQuery({ queryKey: ["monitoring"], queryFn: () => api.latestMonitoring() });
-  const risk = useQuery({ queryKey: ["risk"], queryFn: () => api.latestRisk() });
-  const bayesian = useQuery({ queryKey: ["bayesian"], queryFn: () => api.bayesianRisk() });
-  const insight = useQuery({ queryKey: ["insight"], queryFn: () => api.insight() });
-  const forecast = useQuery({ queryKey: ["forecast"], queryFn: () => api.getForecastLatest().catch(() => null), retry: false });
+  const auth = useAuth();
+  const userId = auth.session?.userId ?? 1;
+  const [showAllReadings, setShowAllReadings] = useState(false);
+  const logs = useQuery({ queryKey: ["logs", userId], queryFn: () => api.logs(userId) });
+  const monitoring = useQuery({ queryKey: ["monitoring", userId], queryFn: () => api.latestMonitoring(userId) });
+  const accuracy = useQuery({ queryKey: ["forecast-accuracy", userId], queryFn: () => api.getForecastAccuracy(userId) });
+  const forecast = useQuery({ queryKey: ["forecast", userId], queryFn: () => api.getForecastLatest(userId).catch(() => null), retry: false });
   const latestLog = logs.data?.length ? logs.data[logs.data.length - 1] : undefined;
-  const thompsonAction = insight.data?.learning_summary?.next_best_action;
-  const pattern = insight.data?.learning_summary?.recent_glucose_pattern;
-  const chartData = (logs.data ?? []).slice(-14).map((log) => {
-    const nonFastingValue = log.post_meal_glucose ?? log.glucose_level;
-    return {
-      log_date: log.log_date,
-      fasting: log.is_fasting ? log.glucose_level : null,
-      non_fasting: log.is_fasting ? null : nonFastingValue,
-    };
-  });
   const actualLogs = (logs.data ?? []).map((log) => ({
     timestamp: log.created_at ?? log.log_date,
     glucose_mmol: toMmol(log.glucose_level),
+    is_fasting: log.is_fasting,
   }));
+  const forecastStatus = forecast.data?.predicted_low_alert ? "Low forecast" : forecast.data?.predicted_high_alert ? "High forecast" : forecast.data?.trend_direction ? titleCase(forecast.data.trend_direction) : "-";
   const weekStatus = monitoring.data?.trend_label === "concerning" ? "Needs attention" : monitoring.data?.trend_label === "watch" ? "Watch closely" : monitoring.data?.trend_label ? "Looks steadier" : "-";
+  const orderedReadings = [...(logs.data ?? [])].reverse();
+  const visibleReadings = showAllReadings ? orderedReadings : orderedReadings.slice(0, 8);
 
   return (
     <div className="page monitoring-page">
       <PageHeader
         title="Monitoring"
-        subtitle="A patient-friendly view of glucose trend support, model evidence, Bayesian smoothing, and adaptive recommendations."
-        meta={monitoring.data?.model_version ? `Trend model: ${monitoring.data.model_version}` : undefined}
+        subtitle="Recent glucose readings, fasting context, and a next 4-hour forecast in one place."
+        meta={forecast.data?.model_version ? `Forecast model: ${forecast.data.model_version}` : undefined}
       />
-      {(logs.isError || monitoring.isError || bayesian.isError) && <ErrorState title="Monitoring data is unavailable" body="Glyco could not load one or more monitoring signals." />}
+      {(logs.isError || monitoring.isError) && <ErrorState title="Monitoring data is unavailable" body="Glyco could not load one or more monitoring signals." />}
 
       <section className="monitoring-hero-panel">
         <div>
           <span>Bottom line</span>
-          <h2>{monitoring.data?.trend_label === "concerning" ? "This week needs attention" : monitoring.data?.trend_label === "watch" ? "Watch the next few readings" : "Pattern looks steadier"}</h2>
-          <p>{String(monitoring.data?.summary.message ?? "Glyco is waiting for enough glucose logs to describe the trend.")}</p>
-
-          <details className="bottom-line-evidence">
-            <summary>Model evidence summary</summary>
-            <div className="model-evidence-list">
-              <div><span>RF risk model</span><strong>{risk.data?.model_version ?? "Loading"}</strong><small>{risk.data?.risk_level ?? "-"} risk</small></div>
-              <div><span>Trend model</span><strong>{monitoring.data?.model_version ?? "Loading"}</strong><small>{monitoring.data?.trend_label ?? "-"} trend</small></div>
-              <div><span>Bayesian posterior</span><strong>{percent(bayesian.data?.posterior_mean)}</strong><small>{bayesian.data?.number_of_updates ?? 0} updates</small></div>
-              <div><span>Recommendation learning</span><strong>{thompsonAction?.type ?? "Learning"}</strong><small>{thompsonAction?.title ?? "Waiting for feedback"}</small></div>
-            </div>
-          </details>
+          <h2>{forecastHeadline(forecast.data ?? null, monitoring.data)}</h2>
+          <p>{forecastSummary(forecast.data ?? null, monitoring.data)}</p>
         </div>
         <div className="monitoring-hero-stats">
           <div><span>Latest glucose</span><strong>{latestLog ? `${latestLog.glucose_level} mg/dL` : "-"}</strong></div>
-          <div><span>This week</span><strong>{weekStatus}</strong></div>
-          <div><span>Bayesian risk</span><strong>{percent(bayesian.data?.posterior_mean)}</strong></div>
-          <div><span>Next action</span><strong>{thompsonAction?.type ?? "Learning"}</strong></div>
+          <div><span>Forecast</span><strong>{forecastStatus}</strong></div>
+          <div><span>Historical trend</span><strong>{weekStatus}</strong></div>
+          <div><span>Evaluated forecasts</span><strong>{accuracy.data?.total_evaluations ?? 0}</strong></div>
+          <div><span>Learning</span><strong>{forecast.data?.calibration_applied ? "Calibrated" : "Learning"}</strong></div>
         </div>
       </section>
 
-      <div className="model-flow-grid">
-        <Card title="Trained Glucose Trend Model" action={<Badge tone={trendTone(monitoring.data?.trend_label)}>{monitoring.data?.trend_label ?? "loading"}</Badge>}>
-          <div className="explain-card-body">
-            <LineChartIcon size={22} />
-            <p>The trend model reads recent glucose logs only. It classifies the pattern as stable, watch, or concerning, so this is glucose trend support, not full vitals monitoring.</p>
-            <small>{monitoring.data?.model_version ?? "Loading model version"}</small>
-          </div>
-        </Card>
-        <Card title="Bayesian Risk Layer" action={<Badge>{bayesian.data ? `${bayesian.data.number_of_updates} updates` : "posterior"}</Badge>}>
-          <div className="explain-card-body">
-            <Brain size={22} />
-            <p>Bayesian smoothing keeps the risk signal from jumping too much after a single RF model result. It shows the current risk belief over time.</p>
-            <small>Posterior {percent(bayesian.data?.posterior_mean)} with interval {bayesian.data ? `${percent(bayesian.data.credible_interval.low)}-${percent(bayesian.data.credible_interval.high)}` : "-"}</small>
-          </div>
-        </Card>
-        <Card title="Thompson Recommendation Ranker" action={<Badge>{thompsonAction?.type ?? "learning"}</Badge>}>
-          <div className="explain-card-body">
-            <Target size={22} />
-            <p>This is the agent learning layer. Feedback changes which recommendation type Glyco puts first next time.</p>
-            <small>{thompsonAction ? `${thompsonAction.title}: ${thompsonAction.body}` : "No personalized action yet"}</small>
-          </div>
-        </Card>
+      <div className="monitoring-main-grid forecast-primary-grid">
+        {logs.isLoading ? <Card title="Glucose Forecast"><LoadingState label="Loading glucose history" /></Card> : <ForecastChart actualLogs={actualLogs} forecast={forecast.data ?? null} monitoring={monitoring.data} userId={userId} />}
       </div>
 
       <div className="monitoring-main-grid">
-        <Card title="Glucose Trend" action={<Badge tone={trendTone(monitoring.data?.trend_label)}>{monitoring.data?.trend_label ?? "watch"}</Badge>}>
-          {logs.isLoading ? <LoadingState label="Loading glucose history" /> : chartData.length ? <div className="chart-box monitoring-chart">
-            <div className="chart-legend" aria-hidden="true">
-              <span className="legend-item fasting"><i />Fasting</span>
-              <span className="legend-item non-fasting"><i />Not fasting</span>
+        <Card title={showAllReadings ? "All Glucose Readings" : "Recent Log History"} action={<Activity size={18} />}>
+          {(logs.data ?? []).length ? (
+            <div className="reading-history">
+              <div className="reading-history-controls" role="group" aria-label="Reading history range">
+                <button type="button" className={!showAllReadings ? "active" : ""} onClick={() => setShowAllReadings(false)}>Recent</button>
+                <button type="button" className={showAllReadings ? "active" : ""} onClick={() => setShowAllReadings(true)}>All {orderedReadings.length}</button>
+              </div>
+              <div className={showAllReadings ? "compact-table reading-history-table all-readings" : "compact-table reading-history-table"}>
+                {visibleReadings.map((log) => (
+                  <div key={log.id}>
+                    <span>{log.created_at ? new Date(log.created_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : log.log_date}</span>
+                    <strong>{log.glucose_level} mg/dL</strong>
+                    <span>{log.is_fasting ? "Fasting" : "Not fasting"}</span>
+                  </div>
+                ))}
+              </div>
             </div>
-            <ResponsiveContainer width="100%" height={320}>
-              <LineChart data={chartData}>
-                <XAxis dataKey="log_date" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} />
-                <Tooltip />
-                <Line type="monotone" dataKey="fasting" name="Fasting" stroke="var(--primary)" strokeWidth={3} strokeLinecap="round" connectNulls isAnimationActive={false} dot={{ r: 4, strokeWidth: 2, fill: "var(--surface)", stroke: "var(--primary)" }} activeDot={{ r: 6 }} />
-                <Line type="monotone" dataKey="non_fasting" name="Not fasting" stroke="var(--rust)" strokeWidth={3} strokeLinecap="round" connectNulls isAnimationActive={false} dot={{ r: 4, strokeWidth: 2, fill: "var(--surface)", stroke: "var(--rust)" }} activeDot={{ r: 6 }} />
-              </LineChart>
-            </ResponsiveContainer>
-          </div> : <EmptyState title="No glucose history" body="Add a few glucose logs to create a useful trend view." />}
-        </Card>
-        <ForecastChart actualLogs={actualLogs} forecast={forecast.data ?? null} />
-      </div>
-
-      <div className="monitoring-main-grid">
-        <Card title="Recent Log History" action={<Activity size={18} />}>
-          {(logs.data ?? []).length ? <div className="compact-table">{(logs.data ?? []).slice(-8).reverse().map((log) => <div key={log.id}><span>{log.log_date}</span><strong>{log.glucose_level} mg/dL</strong><span>{log.is_fasting ? "Fasting" : "Not fasting"}</span></div>)}</div> : <EmptyState title="No log history" body="Use the Log data button to add the first monitoring record." />}
+          ) : <EmptyState title="No log history" body="Use the Log data button to add the first monitoring record." />}
         </Card>
 
         <Card title="What to do next" action={<ClipboardList size={18} />}>
-          <div className="monitoring-next-insight">
-            <div className="roadmap-panel">
-              <span>Roadmap</span>
-              <ol className="roadmap-list">
-                <li>
-                  <strong>Step 1: Do the next best action</strong>
-                  <p>{thompsonAction ? `${thompsonAction.title} - ${thompsonAction.body}` : "Keep glucose logging consistent so Glyco can learn your trend."}</p>
-                </li>
-                <li>
-                  <strong>Step 2: Log the next reading</strong>
-                  <p>Use the Log data button after your next glucose check to keep the trend view accurate.</p>
-                </li>
-                <li>
-                  <strong>Step 3: Follow your weekly plan</strong>
-                  <p>
-                    {insight.data?.what_to_do_next?.length
-                      ? insight.data.what_to_do_next.slice(0, 3).join(" ")
-                      : "Glyco will add a weekly plan once it has enough recent monitoring history."}
-                  </p>
-                </li>
-              </ol>
-              <small>Recent pattern: {pattern?.label ?? "learning"} {pattern?.average ? `, average ${pattern.average} mg/dL` : ""}</small>
+          <div className="forecast-action-panel">
+            <section>
+              <span>Main action</span>
+              <strong>{forecast.data?.recommendation ?? "Add more readings to enable a forecast-based action."}</strong>
+            </section>
+            <section>
+              <span>Next check</span>
+              <p>{nextCheckText(forecast.data ?? null)}</p>
+            </section>
+            <div className="forecast-context-chips">
+              <Badge>{latestLog ? `${latestLog.glucose_level} mg/dL` : "No reading"}</Badge>
+              <Badge tone={trendBadgeTone(forecast.data?.trend_direction)}>{forecast.data?.trend_direction ?? "forecast pending"}</Badge>
+              <Badge tone={forecast.data?.predicted_low_alert ? "danger" : forecast.data?.predicted_high_alert ? "warning" : "good"}>{forecast.data?.predicted_low_alert ? "Low alert" : forecast.data?.predicted_high_alert ? "High alert" : "No forecast alert"}</Badge>
+              <Badge>{forecast.data?.forecast_quality ?? "needs_more_data"}</Badge>
             </div>
-
-            {insight.isLoading ? (
-              <LoadingState label="Preparing Glyco insight" />
-            ) : insight.data ? (
-              <div className="insight-grid">
-                <section className="insight-block">
-                  <Brain size={18} />
-                  <div><span>Glyco Insight</span><p>{insight.data.what_changed}</p></div>
-                </section>
-                <section className="insight-block">
-                  <Target size={18} />
-                  <div><span>Why it matters</span><p>{insight.data.why_it_matters}</p></div>
-                </section>
-                <p className="insight-note">{insight.data.confidence_note}</p>
-              </div>
-            ) : (
-              <EmptyState title="Insight unavailable" body="Glyco needs a current risk assessment and monitoring history to prepare this panel." />
-            )}
           </div>
         </Card>
       </div>

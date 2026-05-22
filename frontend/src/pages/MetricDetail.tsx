@@ -3,6 +3,7 @@ import { ArrowLeft, Brain, ClipboardList, LineChart, ShieldCheck, Target, Trendi
 import { useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api } from "../api/client";
+import { useAuth } from "../auth/auth";
 import { Badge, Card, EmptyState, LoadingState, PageHeader } from "../components/ui";
 
 const metricCopy: Record<string, { title: string; plain: string; icon: typeof TrendingUp }> = {
@@ -48,15 +49,17 @@ function formatPercent(value?: number) {
 }
 
 export function MetricDetail() {
+  const auth = useAuth();
+  const userId = auth.session?.userId ?? 1;
   const navigate = useNavigate();
   const { metricId = "glucose" } = useParams();
   const copy = metricCopy[metricId] ?? metricCopy.glucose;
   const Icon = copy.icon;
-  const logs = useQuery({ queryKey: ["logs"], queryFn: () => api.logs() });
-  const risk = useQuery({ queryKey: ["risk"], queryFn: () => api.latestRisk() });
-  const monitoring = useQuery({ queryKey: ["monitoring"], queryFn: () => api.latestMonitoring() });
-  const bayesian = useQuery({ queryKey: ["bayesian"], queryFn: () => api.bayesianRisk() });
-  const insight = useQuery({ queryKey: ["insight"], queryFn: () => api.insight() });
+  const logs = useQuery({ queryKey: ["logs", userId], queryFn: () => api.logs(userId) });
+  const risk = useQuery({ queryKey: ["risk", userId], queryFn: () => api.latestRisk(userId) });
+  const monitoring = useQuery({ queryKey: ["monitoring", userId], queryFn: () => api.latestMonitoring(userId) });
+  const bayesian = useQuery({ queryKey: ["bayesian", userId], queryFn: () => api.bayesianRisk(userId) });
+  const insight = useQuery({ queryKey: ["insight", userId], queryFn: () => api.insight(userId) });
   const latestLog = logs.data?.length ? logs.data[logs.data.length - 1] : undefined;
   const values = useMemo(() => (logs.data ?? []).slice(-8).map((log) => log.glucose_level), [logs.data]);
   const average = values.length ? Math.round(values.reduce((sum, value) => sum + value, 0) / values.length) : undefined;

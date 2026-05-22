@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { ReportDocument } from "../api/client";
+import { useAuth } from "../auth/auth";
 import { ErrorState, LoadingState, PageHeader } from "../components/ui";
 
 const reportTypes = [
@@ -191,19 +192,21 @@ function ReportPdfPreview({ report }: { report: ReportDocument }) {
 
 /* ─── Main page ───────────────────────────────────────────────────── */
 export function Reports() {
+  const auth = useAuth();
+  const userId = auth.session?.userId ?? 1;
   const queryClient = useQueryClient();
   const [previewReport, setPreviewReport] = useState<ReportDocument | null>(null);
   const [activeArchiveType, setActiveArchiveType] = useState<string>("all");
 
   const reports = useQuery<ReportDocument[]>({
-    queryKey: ["reports"],
-    queryFn: () => api.reports(),
+    queryKey: ["reports", userId],
+    queryFn: () => api.reports(userId),
   });
 
   const create = useMutation({
-    mutationFn: (type: string) => api.report(type),
+    mutationFn: (type: string) => api.report(type, userId),
     onSuccess: (newReport: ReportDocument) => {
-      queryClient.invalidateQueries({ queryKey: ["reports"] });
+      queryClient.invalidateQueries({ queryKey: ["reports", userId] });
       setPreviewReport(newReport);
     },
   });

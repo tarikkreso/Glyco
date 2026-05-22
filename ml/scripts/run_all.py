@@ -14,6 +14,7 @@ PIPELINE = [
     ("clean_cgm_data.py", "data cleaning"),
     ("build_forecast_features.py", "feature engineering"),
     ("train_forecast_model.py", "LightGBM training"),
+    ("train_postprandial_model.py", "CGMacros post-meal training"),
     ("prepare_datasets.py", "existing risk + monitoring prep"),
     ("train_risk_model.py", "existing risk training"),
     ("prepare_monitoring_data.py", "existing monitoring prep"),
@@ -64,6 +65,7 @@ def _summary_rows() -> list[tuple[str, str, str]]:
         PROCESSED_DIR / "cgm_features.csv",
         PROCESSED_DIR / "forecast_feature_metadata.json",
         ARTIFACTS_DIR / "forecast_metadata.json",
+        ARTIFACTS_DIR / "postprandial_forecast_metadata.json",
         ARTIFACTS_DIR / "risk_metadata.json",
         ARTIFACTS_DIR / "trend_metadata.json",
     ]

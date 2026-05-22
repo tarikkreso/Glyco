@@ -14,6 +14,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { api } from "../api/client";
+import { useAuth } from "../auth/auth";
 import { Badge, EmptyState, ErrorState, LoadingState, PageHeader } from "../components/ui";
 
 function percent(value?: number) {
@@ -94,12 +95,14 @@ function renderMealText(item: string) {
 }
 
 export function CarePlan() {
+  const auth = useAuth();
+  const userId = auth.session?.userId ?? 1;
   const queryClient = useQueryClient();
   const [isGenerating, setIsGenerating] = useState(false);
 
   const plan = useQuery({
-    queryKey: ["diet"],
-    queryFn: () => api.diet(1, false),
+    queryKey: ["diet", userId],
+    queryFn: () => api.diet(userId, false),
     staleTime: Infinity,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
@@ -108,15 +111,14 @@ export function CarePlan() {
   const handleGenerate = async () => {
     setIsGenerating(true);
     try {
-      const freshData = await api.diet(1, true);
-      queryClient.setQueryData(["diet"], freshData);
+      const freshData = await api.diet(userId, true);
+      queryClient.setQueryData(["diet", userId], freshData);
     } catch (e) {
       console.error("Failed to generate meal plan", e);
     } finally {
       setIsGenerating(false);
     }
   };
-
   const prefer = (plan.data?.prefer as string[]) ?? [];
   const limit = (plan.data?.limit as string[]) ?? [];
   const sample = (plan.data?.sample_day as string[]) ?? [];

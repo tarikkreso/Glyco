@@ -1,31 +1,147 @@
-import { useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bell, Plus, X } from "lucide-react";
+import { useAuth } from "../auth/auth";
 import { api } from "../api/client";
-import { Card, EmptyState, LoadingState } from "./ui";
+import { Card, EmptyState, LoadingState, useToast } from "./ui";
 import { LogNewDataForm } from "./LogNewDataForm";
+
+type SwipeGestureState = {
+  alertId: number;
+  pointerId: number;
+  startX: number;
+  startY: number;
+  engaged: boolean;
+};
 
 export function GlobalQuickActions() {
   const [logOpen, setLogOpen] = useState(false);
   const [alertsOpen, setAlertsOpen] = useState(false);
 
+  const auth = useAuth();
+  const userId = auth.session?.userId ?? 1;
+  const queryClient = useQueryClient();
+  const toast = useToast();
+
   const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
 
   const monitoring = useQuery({
     queryKey: ["monitoring"],
-    queryFn: () => api.latestMonitoring(),
+    queryFn: () => api.latestMonitoring(userId),
     enabled: alertsOpen,
   });
 
   const alerts = useQuery({
     queryKey: ["alerts"],
-    queryFn: () => api.alerts(),
+    queryFn: () => api.alerts(userId),
     staleTime: 30_000,
     refetchInterval: 60_000,
   });
 
-  const activeAlertCount = (alerts.data ?? []).length;
-  const worstSeverity = (alerts.data ?? []).some((alert) => alert.severity === "danger")
+  const activeAlerts = useMemo(() => {
+    const rows = alerts.data ?? [];
+    const seen = new Set<string>();
+    const unique = [] as typeof rows;
+    for (const row of rows) {
+      if (row.acknowledged_at) continue;
+      const signature = `${row.title}||${row.severity}`;
+      if (seen.has(signature)) continue;
+      seen.add(signature);
+      unique.push(row);
+    }
+    return unique;
+  }, [alerts.data]);
+
+  const swipeRef = useRef<SwipeGestureState | null>(null);
+  const [draggingAlertId, setDraggingAlertId] = useState<number | null>(null);
+  const [swipeOffsets, setSwipeOffsets] = useState<Record<number, number>>({});
+
+  const acknowledgeAlert = useMutation({
+    mutationFn: (alertId: number) => api.acknowledgeAlert(alertId, userId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["alerts"] });
+      toast({ tone: "success", title: "Alert dismissed" });
+    },
+    onError: (error) => {
+      toast({
+        tone: "error",
+        title: "Could not dismiss alert",
+        body: error instanceof Error ? error.message : "Please try again.",
+      });
+    },
+  });
+
+  const deleteAlert = useMutation({
+    mutationFn: (alertId: number) => api.deleteAlert(alertId, userId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["alerts"] });
+      toast({ tone: "success", title: "Alert deleted" });
+    },
+    onError: (error) => {
+      toast({
+        tone: "error",
+        title: "Could not delete alert",
+        body: error instanceof Error ? error.message : "Please try again.",
+      });
+    },
+  });
+
+  const swipeThresholdPx = 90;
+  const swipeMaxPx = 140;
+
+  const onAlertPointerDown = (alertId: number, event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.pointerType !== "touch") return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    swipeRef.current = {
+      alertId,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      engaged: false,
+    };
+  };
+
+  const onAlertPointerMove = (alertId: number, event: React.PointerEvent<HTMLDivElement>) => {
+    const state = swipeRef.current;
+    if (!state || state.alertId !== alertId || state.pointerId !== event.pointerId) return;
+    if (event.pointerType !== "touch") return;
+
+    const dx = event.clientX - state.startX;
+    const dy = event.clientY - state.startY;
+
+    if (!state.engaged) {
+      if (Math.abs(dx) < 8) return;
+      if (Math.abs(dx) <= Math.abs(dy)) return;
+      state.engaged = true;
+      swipeRef.current = state;
+      setDraggingAlertId(alertId);
+    }
+
+    if (!state.engaged) return;
+    event.preventDefault();
+
+    const clamped = Math.max(-swipeMaxPx, Math.min(0, dx));
+    setSwipeOffsets((prev) => ({ ...prev, [alertId]: clamped }));
+  };
+
+  const finishSwipe = (alertId: number) => {
+    setDraggingAlertId((current) => (current === alertId ? null : current));
+    setSwipeOffsets((prev) => ({ ...prev, [alertId]: 0 }));
+    swipeRef.current = null;
+  };
+
+  const onAlertPointerEnd = (alertId: number, event: React.PointerEvent<HTMLDivElement>) => {
+    const state = swipeRef.current;
+    if (!state || state.alertId !== alertId || state.pointerId !== event.pointerId) return;
+
+    const offset = swipeOffsets[alertId] ?? 0;
+    const shouldDelete = offset <= -swipeThresholdPx;
+    finishSwipe(alertId);
+    if (shouldDelete) deleteAlert.mutate(alertId);
+  };
+
+  const activeAlertCount = activeAlerts.length;
+  const worstSeverity = activeAlerts.some((alert) => alert.severity === "danger")
     ? "danger"
     : activeAlertCount
       ? "warning"
@@ -85,7 +201,7 @@ export function GlobalQuickActions() {
 
       {alertsOpen && (
         <div
-          className="log-panel-overlay"
+          className="log-panel-overlay alerts-overlay"
           role="dialog"
           aria-modal="true"
           aria-label="Alerts"
@@ -93,7 +209,7 @@ export function GlobalQuickActions() {
             if (event.target === event.currentTarget) setAlertsOpen(false);
           }}
         >
-          <div className="log-panel" onMouseDown={(event) => event.stopPropagation()}>
+          <div className="log-panel alerts-panel" onMouseDown={(event) => event.stopPropagation()}>
             <Card
               title="Alerts"
               action={
@@ -135,16 +251,45 @@ export function GlobalQuickActions() {
                   <strong>Agent Alerts</strong>
                   {alerts.isLoading ? (
                     <LoadingState label="Loading proactive alerts" />
-                  ) : (alerts.data ?? []).length ? (
+                  ) : activeAlerts.length ? (
                     <div className="alert-list">
-                      {alerts.data?.slice(0, 6).map((alert) => (
+                      {activeAlerts.map((alert) => (
                         <div
                           key={alert.id}
-                          className={alert.severity === "danger" ? "danger" : "warning"}
+                          className={`${alert.severity === "danger" ? "danger" : "warning"} swipeable-alert${draggingAlertId === alert.id ? " dragging" : ""}`}
+                          style={
+                            swipeOffsets[alert.id]
+                              ? { transform: `translateX(${swipeOffsets[alert.id]}px)` }
+                              : undefined
+                          }
+                          onPointerDown={(event) => onAlertPointerDown(alert.id, event)}
+                          onPointerMove={(event) => onAlertPointerMove(alert.id, event)}
+                          onPointerUp={(event) => onAlertPointerEnd(alert.id, event)}
+                          onPointerCancel={(event) => onAlertPointerEnd(alert.id, event)}
                         >
-                          <strong>{alert.title}</strong>
+                          <div className="alert-item-head">
+                            <strong>{alert.title}</strong>
+                            <div className="alert-item-actions">
+                              <button
+                                type="button"
+                                onClick={() => acknowledgeAlert.mutate(alert.id)}
+                                disabled={acknowledgeAlert.isPending || deleteAlert.isPending}
+                                aria-label={`Dismiss alert: ${alert.title}`}
+                              >
+                                Dismiss
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => deleteAlert.mutate(alert.id)}
+                                disabled={acknowledgeAlert.isPending || deleteAlert.isPending}
+                                aria-label={`Delete alert: ${alert.title}`}
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          </div>
                           <span>
-                            {alert.message} {alert.recommended_action}
+                            {alert.message}{alert.recommended_action ? ` ${alert.recommended_action}` : ""}
                           </span>
                         </div>
                       ))}
@@ -187,7 +332,7 @@ export function GlobalQuickActions() {
               }
             >
               <p className="log-panel-meta">Quick glucose entry for {today}. Date and time are recorded automatically.</p>
-              <LogNewDataForm onSuccess={() => setLogOpen(false)} />
+              <LogNewDataForm userId={userId} onSuccess={() => setLogOpen(false)} />
             </Card>
           </div>
         </div>

@@ -3,6 +3,7 @@ import { ArrowUp, Maximize2, MessageSquareText, Sparkles, X } from "lucide-react
 import { useMemo, useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
+import { useAuth } from "../auth/auth";
 import { Badge, ErrorState, LoadingState } from "../components/ui";
 import { appendAgentAssistantMessage, appendAgentUserMessage, setAgentDraft, useAgentChatSession } from "../state/agentChatSession";
 
@@ -144,6 +145,8 @@ function buildUsefulInsight({
 }
 
 export function Overview() {
+  const auth = useAuth();
+  const userId = auth.session?.userId ?? 1;
   const navigate = useNavigate();
   const [feeling, setFeeling] = useState<Feeling | null>(null);
   const [selectedSymptoms, setSelectedSymptoms] = useState<string[]>([]);
@@ -153,11 +156,11 @@ export function Overview() {
   const chatSession = useAgentChatSession();
   const chatThreadRef = useRef<HTMLDivElement>(null);
 
-  const risk = useQuery({ queryKey: ["risk"], queryFn: () => api.latestRisk() });
-  const monitoring = useQuery({ queryKey: ["monitoring"], queryFn: () => api.latestMonitoring() });
-  const bayesian = useQuery({ queryKey: ["bayesian"], queryFn: () => api.bayesianRisk() });
-  const logs = useQuery({ queryKey: ["logs"], queryFn: () => api.logs() });
-  const insight = useQuery({ queryKey: ["insight"], queryFn: () => api.insight() });
+  const risk = useQuery({ queryKey: ["risk", userId], queryFn: () => api.latestRisk(userId) });
+  const monitoring = useQuery({ queryKey: ["monitoring", userId], queryFn: () => api.latestMonitoring(userId) });
+  const bayesian = useQuery({ queryKey: ["bayesian", userId], queryFn: () => api.bayesianRisk(userId) });
+  const logs = useQuery({ queryKey: ["logs", userId], queryFn: () => api.logs(userId) });
+  const insight = useQuery({ queryKey: ["insight", userId], queryFn: () => api.insight(userId) });
 
   const latestLog = logs.data?.length ? logs.data[logs.data.length - 1] : undefined;
   const daysSinceLastLog = useMemo(() => {
@@ -195,7 +198,7 @@ export function Overview() {
   });
 
   const chat = useMutation({
-    mutationFn: (message: string) => api.agentChat(message),
+    mutationFn: (message: string) => api.agentChat(message, userId),
     onSuccess: (response, message) => {
       appendAgentAssistantMessage(response.answer, response);
     },

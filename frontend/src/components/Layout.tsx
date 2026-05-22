@@ -1,6 +1,7 @@
-import { Activity, BarChart3, ClipboardList, FileText, HeartPulse, Home, Menu, MessageSquareText, PanelLeftClose, PanelLeftOpen, Share2, Utensils } from "lucide-react";
+import { Activity, BarChart3, ClipboardList, FileText, Home, Menu, MessageSquareText, PanelLeftClose, PanelLeftOpen, Settings, Share2, Utensils } from "lucide-react";
 import { useState } from "react";
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { useAuth } from "../auth/auth";
 import { GlobalQuickActions } from "./GlobalQuickActions";
 import { ToastProvider } from "./ui";
 
@@ -11,10 +12,14 @@ const nav = [
   { to: "/reports", label: "Reports", icon: FileText },
   { to: "/care-plan", label: "Care Plan", icon: ClipboardList },
   { to: "/family", label: "Family View", icon: Share2 },
+  { to: "/profile", label: "Profile", icon: Settings },
 ];
 
 export function Layout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const auth = useAuth();
+  const navigate = useNavigate();
+  const initials = auth.session?.email.slice(0, 2).toUpperCase() ?? "SK";
 
   return (
     <ToastProvider>
@@ -43,13 +48,25 @@ export function Layout() {
           </nav>
           <div className="sidebar-footer">
             <span>Help Center</span>
-            <span>Logout</span>
+            <button
+              type="button"
+              className="link-button"
+              onClick={() => {
+                auth.logout();
+                navigate("/login", { replace: true });
+              }}
+            >
+              Logout
+            </button>
           </div>
         </aside>
         <main>
           <header className="topbar">
             <div className="mobile-brand"><Menu size={18} /> Glyco</div>
-            <div className="avatar">SK</div>
+            <button type="button" className="topbar-account" onClick={() => navigate("/profile")} aria-label="Open profile settings">
+              <span>{auth.session?.fullName || auth.session?.email}</span>
+              <div className="avatar">{initials}</div>
+            </button>
           </header>
           <Outlet />
           <GlobalQuickActions />

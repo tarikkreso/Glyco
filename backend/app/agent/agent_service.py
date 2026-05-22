@@ -9,6 +9,7 @@ from app.agent.safety import safety_note, urgent_message_if_needed
 from app.agent.tools import get_logs, get_profile, retrieve_guideline_snippets, run_risk_check, run_trend_check
 from app.db import models
 from app.ml.forecast_inference import get_forecast_service
+from app.services.forecast_learning import apply_calibration
 from app.services.bayesian import get_or_create_bayesian_state, serialize_bayesian_state
 
 
@@ -201,7 +202,11 @@ def _forecast_logs(db: Session, user_id: int) -> list[dict]:
         .all()
     )
     return [
-        {"timestamp": row.created_at or row.log_date, "glucose_mmol": _as_mmol(row.glucose_level)}
+        {
+            "timestamp": row.created_at or row.log_date,
+            "glucose_mmol": _as_mmol(row.glucose_level),
+            "is_fasting": bool(row.is_fasting),
+        }
         for row in reversed(rows)
         if row.glucose_level is not None
     ]
@@ -252,7 +257,7 @@ def _load_forecast_context_sync(user_id: int, db: Session) -> dict | None:
     logs = _forecast_logs(db, user_id)
     if len(logs) < 4:
         return None
-    result = get_forecast_service().predict(user_id, logs)
+    result = apply_calibration(db, get_forecast_service().predict(user_id, logs))
     return _forecast_row_to_dict(_save_forecast_context(db, result))
 
 

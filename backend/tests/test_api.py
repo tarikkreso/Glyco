@@ -311,6 +311,71 @@ class GlycoApiTests(unittest.TestCase):
         alerts = self.client.get("/api/alerts/1").json()
         self.assertGreaterEqual(len(alerts), 1)
 
+    def test_alert_acknowledge_and_delete_endpoints(self) -> None:
+        db = SessionLocal()
+        user = None
+        try:
+            user = models.User(full_name="Alert Actions", email_or_demo_id="demo-alert-actions")
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+
+            # Two duplicate alerts (same signature) + one distinct alert.
+            a1 = models.AgentAlert(
+                user_id=user.id,
+                severity="warning",
+                title="Duplicate alert",
+                message="a",
+                recommended_action="do x",
+                source_json={},
+            )
+            a2 = models.AgentAlert(
+                user_id=user.id,
+                severity="warning",
+                title="Duplicate alert",
+                message="b",
+                recommended_action="do x",
+                source_json={},
+            )
+            b1 = models.AgentAlert(
+                user_id=user.id,
+                severity="danger",
+                title="Other alert",
+                message="c",
+                recommended_action="do y",
+                source_json={},
+            )
+            db.add_all([a1, a2, b1])
+            db.commit()
+            db.refresh(a1)
+            db.refresh(a2)
+            db.refresh(b1)
+
+            alerts = self.client.get(f"/api/alerts/{user.id}").json()
+            titles = {row["title"] for row in alerts}
+            self.assertEqual(titles, {"Duplicate alert", "Other alert"})
+
+            ack = self.client.post(f"/api/alerts/{a1.id}/acknowledge?user_id={user.id}").json()
+            self.assertTrue(ack.get("acknowledged"))
+
+            # Both duplicates should now be acknowledged.
+            remaining_active = self.client.get(f"/api/alerts/{user.id}").json()
+            self.assertEqual({row["title"] for row in remaining_active}, {"Other alert"})
+            db.expire_all()
+            dup_rows = db.query(models.AgentAlert).filter(models.AgentAlert.user_id == user.id, models.AgentAlert.title == "Duplicate alert").all()
+            self.assertEqual(len(dup_rows), 2)
+            self.assertTrue(all(row.acknowledged_at is not None for row in dup_rows))
+
+            deleted = self.client.delete(f"/api/alerts/{b1.id}?user_id={user.id}").json()
+            self.assertTrue(deleted.get("deleted"))
+            self.assertEqual(self.client.get(f"/api/alerts/{user.id}").json(), [])
+        finally:
+            if user is not None:
+                db.query(models.AgentAlert).filter(models.AgentAlert.user_id == user.id).delete()
+                db.query(models.User).filter(models.User.id == user.id).delete()
+                db.commit()
+            db.close()
+
     def test_care_plan_uses_current_patient_data(self) -> None:
         plan = self.client.post("/api/care-plan/diet?user_id=1&force_refresh=True").json()
         self.assertTrue(any(s in plan["source"] for s in {"fallback", "gemini", "deepseek", "liquid"}))

@@ -48,6 +48,16 @@ class GlucoseForecastService:
         self.mae_per_horizon: dict[str, float] = {str(horizon): 1.5 for horizon in HORIZONS}
         self.model_version = "rules-forecast-fallback-0.1"
         self.fallback_model_version = "rules-forecast-fallback-0.1"
+        self.postprandial_metadata: dict[str, Any] = {}
+        self.postprandial_available = False
+        self.postprandial_model_version = "cgmacros-postprandial-population-0.1"
+        self.postprandial_mae_per_horizon: dict[str, float] = {str(horizon): 1.5 for horizon in HORIZONS}
+        self.postprandial_drift_ratios: dict[str, float] = {
+            "60": 1.02,
+            "120": 1.01,
+            "180": 0.99,
+            "240": 0.98,
+        }
         self._load_artifacts()
 
     def _load_artifacts(self) -> None:
@@ -76,6 +86,33 @@ class GlucoseForecastService:
         self.model_available = not failed and len(self.models) == len(HORIZONS)
         if failed:
             logger.warning("Forecast artifacts unavailable: %s", "; ".join(failed))
+        self._load_postprandial_metadata()
+
+    def _load_postprandial_metadata(self) -> None:
+        """Load CGMacros-derived post-meal population metadata for sparse/manual forecasts."""
+        metadata_path = ARTIFACTS_DIR / "postprandial_forecast_metadata.json"
+        try:
+            self.postprandial_metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            self.postprandial_model_version = (
+                f"{self.postprandial_metadata.get('model_version', self.postprandial_model_version)}-population-drift"
+            )
+            ratios = self.postprandial_metadata.get("t2d_postmeal_drift_ratios", {})
+            self.postprandial_drift_ratios = {
+                str(horizon): float(ratios.get(str(horizon), self.postprandial_drift_ratios[str(horizon)]))
+                for horizon in HORIZONS
+            }
+            mae = self.postprandial_metadata.get("mae_per_horizon", {})
+            self.postprandial_mae_per_horizon = {
+                "60": float(mae.get("60", 1.5)),
+                "120": float(mae.get("120", 1.8)),
+                # CGMacros metadata has 30/60/120-minute targets; wider intervals keep longer estimates cautious.
+                "180": float(mae.get("120", 1.8)) + 0.4,
+                "240": float(mae.get("120", 1.8)) + 0.7,
+            }
+            self.postprandial_available = True
+        except Exception as exc:
+            self.postprandial_available = False
+            logger.warning("Postprandial forecast metadata unavailable: %s", exc)
 
     def _median_gap_minutes(self, logs: list[dict]) -> float | None:
         """Return the median gap between recent readings in minutes."""
@@ -198,6 +235,44 @@ class GlucoseForecastService:
             "horizon_minutes": HORIZONS,
         }
 
+    def _postprandial_population_forecast(self, logs: list[dict]) -> dict[str, Any] | None:
+        """
+        Forecast sparse/manual logs using CGMacros-derived Type 2 post-meal drift.
+
+        The app does not yet collect full meal macro context, so this method uses
+        population drift ratios learned from the trained CGMacros postprandial
+        model metadata instead of pretending per-meal LightGBM features exist.
+        """
+        if not self.postprandial_available or not logs:
+            return None
+        ordered = sorted(logs, key=lambda item: str(item.get("timestamp", "")))
+        last = ordered[-1]
+        last_glucose = _as_mmol(float(last.get("glucose_mmol", last.get("glucose_level", 7.0))))
+        predictions = {
+            str(horizon): round(last_glucose * self.postprandial_drift_ratios[str(horizon)], 2)
+            for horizon in HORIZONS
+        }
+        confidence = {}
+        for horizon, prediction in predictions.items():
+            # Sparse/manual logs need wider intervals than dense CGM model predictions.
+            mae = max(1.5, float(self.postprandial_mae_per_horizon.get(horizon, 1.5)))
+            confidence[horizon] = {"low": round(prediction - mae, 2), "high": round(prediction + mae, 2)}
+        trend = self._trend_direction(predictions["60"], last_glucose)
+        low_alert = any(value < self.thresholds["hypo_mmol"] for value in predictions.values())
+        high_alert = any(value > self.thresholds["target_high_mmol"] for value in predictions.values())
+        return {
+            "current_glucose": round(last_glucose, 2),
+            "predictions": predictions,
+            "confidence_intervals": confidence,
+            "trend_direction": trend,
+            "predicted_low_alert": low_alert,
+            "predicted_high_alert": high_alert,
+            "recommendation": self.generate_recommendation(predictions, last_glucose, trend, low_alert, high_alert),
+            "model_version": self.postprandial_model_version,
+            "used_fallback": False,
+            "horizon_minutes": HORIZONS,
+        }
+
     def _trend_direction(self, prediction_60min: float, current_glucose: float) -> str:
         """Classify the near-term forecast as rising, falling, or stable."""
         if prediction_60min > current_glucose + 0.5:
@@ -210,7 +285,13 @@ class GlucoseForecastService:
         """
         Main prediction method. Returns a forecast result dict.
         """
-        if len(logs) < 4 or not self.model_available or not self._is_cgm_like_cadence(logs):
+        if len(logs) < 4:
+            result = self._rule_based_fallback(logs)
+            return {"user_id": int(user_id), **result}
+        if not self._is_cgm_like_cadence(logs):
+            result = self._postprandial_population_forecast(logs) or self._rule_based_fallback(logs)
+            return {"user_id": int(user_id), **result}
+        if not self.model_available:
             result = self._rule_based_fallback(logs)
             return {"user_id": int(user_id), **result}
         feature_row = self._build_feature_row(logs)

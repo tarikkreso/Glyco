@@ -3,6 +3,7 @@ import { ArrowUp, ClipboardList, Database, History, RotateCcw, ShieldCheck, Spar
 import type { ReactNode } from "react";
 import { useMemo, useState, useRef, useEffect } from "react";
 import { api, type AgentChatResponse } from "../api/client";
+import { useAuth } from "../auth/auth";
 import { Badge, Card, EmptyState, ErrorState, LoadingState, PageHeader } from "../components/ui";
 import { appendAgentAssistantMessage, appendAgentUserMessage, resetAgentConversation, setAgentDraft, useAgentChatSession } from "../state/agentChatSession";
 
@@ -76,20 +77,22 @@ function FormattedResponse({ content }: { content: string }) {
 }
 
 export function Agent() {
+  const auth = useAuth();
+  const userId = auth.session?.userId ?? 1;
   const chatSession = useAgentChatSession();
   const [feedbackTone, setFeedbackTone] = useState("concise");
   const [historyOpen, setHistoryOpen] = useState(false);
   const chatThreadRef = useRef<HTMLDivElement>(null);
-  const risk = useQuery({ queryKey: ["risk"], queryFn: () => api.latestRisk() });
-  const monitoring = useQuery({ queryKey: ["monitoring"], queryFn: () => api.latestMonitoring() });
-  const logs = useQuery({ queryKey: ["logs"], queryFn: () => api.logs() });
-  const alerts = useQuery({ queryKey: ["alerts"], queryFn: () => api.alerts() });
+  const risk = useQuery({ queryKey: ["risk", userId], queryFn: () => api.latestRisk(userId) });
+  const monitoring = useQuery({ queryKey: ["monitoring", userId], queryFn: () => api.latestMonitoring(userId) });
+  const logs = useQuery({ queryKey: ["logs", userId], queryFn: () => api.logs(userId) });
+  const alerts = useQuery({ queryKey: ["alerts", userId], queryFn: () => api.alerts(userId) });
   const latestResponse = useMemo(() => [...chatSession.messages].reverse().find((item) => item.response)?.response, [chatSession.messages]);
   const chatHistory = useMemo(() => chatSession.messages.filter((message) => message.role === "user"), [chatSession.messages]);
   const llmLabel = latestResponse ? `${latestResponse.llm_mode}: ${latestResponse.llm_model}` : "fallback";
   const learning = latestResponse?.learning_summary;
   const chat = useMutation({
-    mutationFn: (message: string) => api.agentChat(message),
+    mutationFn: (message: string) => api.agentChat(message, userId),
     onSuccess: (response, message) => {
       appendAgentAssistantMessage(response.answer, response);
     },
@@ -99,6 +102,7 @@ export function Agent() {
   });
   const feedback = useMutation({
     mutationFn: (helpful: boolean) => api.agentFeedback({
+      user_id: userId,
       message: latestResponse?.answer ?? "No answer selected",
       helpful,
       preferred_tone: feedbackTone,

@@ -8,6 +8,7 @@ from typing import Any
 import httpx
 from sqlalchemy.orm import Session
 
+from app.agent.llm_client import gemini_is_rate_limited, note_gemini_rate_limit
 from app.agent.tool_registry import context_from_tool_results, execute_agent_tool, gemini_tool_declarations
 
 logger = logging.getLogger(__name__)
@@ -72,7 +73,7 @@ def _json_safe(value: Any) -> Any:
 
 def run_gemini_agentic_chat(db: Session, user_id: int, user_message: str) -> dict | None:
     """Run a Gemini function-calling loop where the model chooses and receives tools."""
-    if not _gemini_configured():
+    if not _gemini_configured() or gemini_is_rate_limited():
         return None
 
     api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GLYCO_GEMINI_API_KEY", "")
@@ -103,6 +104,11 @@ def run_gemini_agentic_chat(db: Session, user_id: int, user_message: str) -> dic
             )
             response.raise_for_status()
             parts, finish_reason = _extract_parts(response.json())
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 429:
+                note_gemini_rate_limit()
+            logger.warning("Gemini agentic loop failed: %s", exc)
+            return None
         except Exception as exc:
             logger.warning("Gemini agentic loop failed: %s", exc)
             return None

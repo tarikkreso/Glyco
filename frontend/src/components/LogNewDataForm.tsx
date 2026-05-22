@@ -81,9 +81,22 @@ export function LogNewDataForm({
   const queryClient = useQueryClient();
   const toast = useToast();
 
+  const GLUCOSE_MIN = 40;
+  const GLUCOSE_MAX = 500;
+
   const [step, setStep] = useState<"type" | "value">("type");
   const [isFasting, setIsFasting] = useState(true);
   const [glucoseLevel, setGlucoseLevel] = useState(128);
+  const [glucoseDraft, setGlucoseDraft] = useState("128");
+
+  const setGlucoseCommitted = useCallback(
+    (next: number) => {
+      const clamped = clamp(next, GLUCOSE_MIN, GLUCOSE_MAX);
+      setGlucoseLevel(clamped);
+      setGlucoseDraft(String(clamped));
+    },
+    [GLUCOSE_MAX, GLUCOSE_MIN]
+  );
 
   const addLog = useMutation({
     mutationFn: (values: LogNewDataValues) =>
@@ -92,10 +105,18 @@ export function LogNewDataForm({
         glucose_level: values.glucose_level,
         is_fasting: values.is_fasting === "true",
       }),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries();
+    onSuccess: () => {
+      void Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["logs"] }),
+        queryClient.invalidateQueries({ queryKey: ["monitoring"] }),
+        queryClient.invalidateQueries({ queryKey: ["risk"] }),
+        queryClient.invalidateQueries({ queryKey: ["bayesian"] }),
+        queryClient.invalidateQueries({ queryKey: ["insight"] }),
+        queryClient.invalidateQueries({ queryKey: ["forecast"] }),
+        queryClient.invalidateQueries({ queryKey: ["alerts"] }),
+      ]);
       setStep("type");
-      setGlucoseLevel(128);
+      setGlucoseCommitted(128);
       toast({
         tone: "success",
         title: "Saved",
@@ -106,8 +127,15 @@ export function LogNewDataForm({
   });
 
   const submit = () => {
+    const parsed = Number(glucoseDraft);
+    const nextValue = clamp(
+      Number.isFinite(parsed) ? parsed : glucoseLevel,
+      GLUCOSE_MIN,
+      GLUCOSE_MAX
+    );
+    setGlucoseCommitted(nextValue);
     addLog.mutate({
-      glucose_level: glucoseLevel,
+      glucose_level: nextValue,
       is_fasting: isFasting ? "true" : "false",
     });
   };
@@ -163,30 +191,38 @@ export function LogNewDataForm({
                 type="button"
                 className="icon-button"
                 aria-label="Increase glucose"
-                onClick={() => setGlucoseLevel((v) => clamp(v + 1, 40, 500))}
+                onClick={() => setGlucoseCommitted(glucoseLevel + 1)}
               >
                 <ChevronUp size={18} aria-hidden="true" />
               </button>
               <input
                 type="number"
                 inputMode="numeric"
-                min={40}
-                max={500}
+                min={GLUCOSE_MIN}
+                max={GLUCOSE_MAX}
                 step={1}
-                value={glucoseLevel}
-                onChange={(event) => setGlucoseLevel(clamp(Number(event.target.value || 0), 40, 500))}
+                value={glucoseDraft}
+                onChange={(event) => setGlucoseDraft(event.target.value)}
+                onBlur={() => {
+                  const parsed = Number(glucoseDraft);
+                  if (!Number.isFinite(parsed)) {
+                    setGlucoseDraft(String(glucoseLevel));
+                    return;
+                  }
+                  setGlucoseCommitted(parsed);
+                }}
               />
               <button
                 type="button"
                 className="icon-button"
                 aria-label="Decrease glucose"
-                onClick={() => setGlucoseLevel((v) => clamp(v - 1, 40, 500))}
+                onClick={() => setGlucoseCommitted(glucoseLevel - 1)}
               >
                 <ChevronDown size={18} aria-hidden="true" />
               </button>
             </div>
 
-            <GlucoseWheel value={glucoseLevel} onChange={setGlucoseLevel} />
+            <GlucoseWheel value={glucoseLevel} onChange={setGlucoseCommitted} />
           </label>
 
           <button className="primary span-all" type="submit">

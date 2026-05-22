@@ -8,17 +8,17 @@ export function Onboarding() {
   const navigate = useNavigate();
 
   return (
-    <div className="page narrow">
+    <div className="page narrow onboarding-page">
       <PageHeader
-        title="Onboarding"
-        subtitle="Enter your baseline profile and run your first risk check to start tracking."
+        title="Set Up Your Baseline"
+        subtitle="Complete one guided risk check so Glyco can personalize your dashboard from the first screen."
         meta={auth.session?.email}
       />
 
       <RiskCheckFlow
         variant="onboarding"
+        userId={auth.session?.userId ?? 1}
         onComplete={() => {
-          auth.completeOnboarding();
           navigate("/overview", { replace: true });
         }}
       />

@@ -81,3 +81,6 @@ __pycache__/
 .pytest_cache/
 backend/glyco.db
 
+# Large datasets
+data/raw/CGMacros_dateshifted365.zip*
+data/raw/CGMacros_dateshifted365_tmp.zip

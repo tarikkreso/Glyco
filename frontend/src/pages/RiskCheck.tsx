@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { Link } from "react-router-dom";
 import { api, RiskAssessment } from "../api/client";
+import { useAuth } from "../auth/auth";
 import { Badge, Card, EmptyState, ErrorState, FactorList, LoadingState, PageHeader } from "../components/ui";
 
 type FormValues = {
@@ -44,9 +45,11 @@ function Stepper({
 export function RiskCheckFlow({
   variant,
   onComplete,
+  userId = 1,
 }: {
   variant: RiskCheckVariant;
   onComplete?: () => void;
+  userId?: number;
 }) {
   const steps = useMemo(
     () => [
@@ -79,7 +82,7 @@ export function RiskCheckFlow({
   const mutation = useMutation<RiskAssessment, Error, FormValues>({
     mutationFn: (values) =>
       api.assessRisk({
-        user_id: 1,
+        user_id: userId,
         fruits: true,
         veggies: true,
         stroke_history: false,
@@ -248,10 +251,12 @@ export function RiskCheckFlow({
 }
 
 export function RiskCheck() {
+  const auth = useAuth();
+
   return (
     <div className="page narrow">
       <PageHeader title="Patient Risk Assessment" subtitle="Complete the clinical matrix below to calculate the current Type 2 diabetes risk profile." />
-      <RiskCheckFlow variant="app" />
+      <RiskCheckFlow variant="app" userId={auth.session?.userId ?? 1} />
     </div>
   );
 }

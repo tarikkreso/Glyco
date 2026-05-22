@@ -1,5 +1,5 @@
 from datetime import date, datetime
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, JSON, String, Text
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
@@ -154,6 +154,46 @@ class GlucoseForecast(Base):
     recommendation: Mapped[str | None] = mapped_column(Text)
     model_version: Mapped[str | None] = mapped_column(String)
     used_fallback: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class GlucoseForecastEvaluation(Base):
+    """Stores actual-vs-predicted glucose comparisons for forecast learning."""
+
+    __tablename__ = "glucose_forecast_evaluations"
+    __table_args__ = (
+        UniqueConstraint("forecast_id", "horizon_minutes", name="uq_forecast_eval_horizon"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    forecast_id: Mapped[int] = mapped_column(ForeignKey("glucose_forecasts.id"), nullable=False)
+    horizon_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
+    predicted_for: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    predicted_mmol: Mapped[float] = mapped_column(Float, nullable=False)
+    actual_log_id: Mapped[int] = mapped_column(ForeignKey("health_logs.id"), nullable=False)
+    actual_mmol: Mapped[float] = mapped_column(Float, nullable=False)
+    absolute_error: Mapped[float] = mapped_column(Float, nullable=False)
+    signed_error: Mapped[float] = mapped_column(Float, nullable=False)
+    model_version: Mapped[str | None] = mapped_column(String)
+    matched_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class GlucoseForecastCalibration(Base):
+    """Stores lightweight per-user forecast calibration learned from outcomes."""
+
+    __tablename__ = "glucose_forecast_calibrations"
+    __table_args__ = (
+        UniqueConstraint("user_id", "horizon_minutes", "model_version", name="uq_forecast_calibration"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    horizon_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
+    count: Mapped[int] = mapped_column(Integer, default=0)
+    mean_absolute_error: Mapped[float] = mapped_column(Float, default=0.0)
+    signed_bias: Mapped[float] = mapped_column(Float, default=0.0)
+    model_version: Mapped[str | None] = mapped_column(String)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 class AgentAlert(Base):
