@@ -1,5 +1,5 @@
 from secrets import token_urlsafe
-from datetime import date
+from datetime import date, datetime, timedelta
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
@@ -377,6 +377,17 @@ def agent_chat(payload: AgentChatIn, db: Session = Depends(get_db)):
     }
 
 
+@router.post("/agent/reset")
+def reset_agent_memory(user_id: int = 1, db: Session = Depends(get_db)):
+    """Clear all AgentMemory conversation history rows for a given user."""
+    if not db.get(models.User, user_id):
+        raise HTTPException(404, "User not found")
+    db.query(models.AgentMemory).filter(models.AgentMemory.user_id == user_id).delete()
+    db.commit()
+    return {"status": "ok", "message": "Agent memory cleared successfully"}
+
+
+
 @router.post("/agent/feedback", response_model=AgentFeedbackOut)
 def agent_feedback(payload: AgentFeedbackIn, db: Session = Depends(get_db)):
     """Persist agent feedback and update recommendation bandit state."""
@@ -442,11 +453,41 @@ def get_agent_alerts(user_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/care-plan/diet")
-def diet_plan(user_id: int = 1, db: Session = Depends(get_db)):
+def diet_plan(user_id: int = 1, force_refresh: bool = False, db: Session = Depends(get_db)):
     """Return a personalized care plan from live patient/model data."""
     if not db.get(models.User, user_id):
         raise HTTPException(404, "User not found")
-    return build_care_plan(db, user_id)
+    
+    # Check if we have a cached diet care plan from the last 24 hours
+    if not force_refresh:
+        one_day_ago = datetime.utcnow() - timedelta(days=1)
+        cached = (
+            db.query(models.Report)
+            .filter(
+                models.Report.user_id == user_id,
+                models.Report.report_type == "diet_care_plan",
+                models.Report.created_at >= one_day_ago,
+            )
+            .order_by(models.Report.created_at.desc())
+            .first()
+        )
+        if cached:
+            return cached.content_json
+
+    # Build a fresh plan
+    plan = build_care_plan(db, user_id)
+
+    # Cache it in the reports table
+    report = models.Report(
+        user_id=user_id,
+        report_type="diet_care_plan",
+        content_json=plan,
+    )
+    db.add(report)
+    db.commit()
+    db.refresh(report)
+
+    return plan
 
 
 @router.post("/family-shares")
@@ -469,4 +510,12 @@ def read_family_share(share_token: str, db: Session = Depends(get_db)):
     logs = db.query(models.HealthLog).filter(models.HealthLog.user_id == share.user_id).order_by(models.HealthLog.log_date.asc()).all()
     monitoring = latest_monitoring(share.user_id, db)
     risk = latest_risk(share.user_id, db)
-    return {"user": user, "share": {"shared_with_name": share.shared_with_name, "relationship": share.relationship}, "logs": logs, "monitoring": monitoring, "risk": risk}
+    serialized_logs = [HealthLogOut.model_validate(log) for log in logs]
+    serialized_user = UserOut.model_validate(user) if user else None
+    return {
+        "user": serialized_user,
+        "share": {"shared_with_name": share.shared_with_name, "relationship": share.relationship},
+        "logs": serialized_logs,
+        "monitoring": monitoring,
+        "risk": risk
+    }

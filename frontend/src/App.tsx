@@ -22,8 +22,8 @@ export default function App() {
         <Route path="/reports" element={<Reports />} />
         <Route path="/care-plan" element={<CarePlan />} />
         <Route path="/family" element={<FamilyView />} />
-        <Route path="/share/:token" element={<FamilyView />} />
       </Route>
+      <Route path="/share/:token" element={<FamilyView isPublic={true} />} />
     </Routes>
   );
 }

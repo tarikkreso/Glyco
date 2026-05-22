@@ -126,9 +126,10 @@ def _fallback_plan(context: dict) -> dict:
         "prefer": prefer,
         "limit": limit,
         "sample_day": [
-            "Breakfast: choose a steady option and log fasting first if this is a fasting day.",
-            "Main meal: pair the main carbohydrate with protein or fiber, then note the next not-fasting reading.",
-            "Evening: keep snacks simple and write one note if sleep, stress, or schedule changed.",
+            "Spinach and Mushroom Scrambled Eggs:\n- 2 large eggs\n- 60g fresh spinach\n- 50g sliced mushrooms\n- 10 ml olive oil\nScramble the eggs with spinach and mushrooms in olive oil. Serve with 1 slice (30g) of sprouted whole-grain toast and black coffee.",
+            "Grilled Chicken Avocado Salad:\n- 115g chicken breast\n- 100g mixed romaine lettuce\n- 50g cherry tomatoes\n- 50g sliced cucumbers\n- 1/4 (40g) avocado\n- 15 ml olive oil and fresh lemon juice\nGrill the chicken, slice it, and toss with salad ingredients and dressing.",
+            "Baked Lemon-Herb Salmon:\n- 140g salmon fillet seasoned with dill\n- 100g roasted broccoli florets\n- 75g fresh asparagus\n- 100 ml cooked wild rice or quinoa\nBake the salmon and serve with the steamed/roasted vegetables and wild rice.",
+            "Plain Greek Yogurt & Almonds:\n- 120 ml plain, unsweetened Greek yogurt\n- 15g crushed raw almonds\n- 5g chia seeds\n- Sprinkle of cinnamon\nCombine ingredients in a bowl for a protein-rich snack."
         ],
         "weekly_recommendations": weekly[:5],
         "signals": {
@@ -146,20 +147,18 @@ def _fallback_plan(context: dict) -> dict:
     }
 
 
-def _gemini_plan(context: dict, fallback: dict) -> dict | None:
-    provider = os.getenv("GLYCO_LLM_PROVIDER", "").lower()
-    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GLYCO_GEMINI_API_KEY", "")
-    if provider not in {"gemini", "google"} or not api_key:
-        return None
-    model = os.getenv("GLYCO_GEMINI_MODEL", "gemini-2.5-flash")
-    base_url = os.getenv("GLYCO_GEMINI_URL", "https://generativelanguage.googleapis.com/v1beta")
+from app.agent.llm_client import get_llm_client
+
+
+def _personalized_plan(context: dict, fallback: dict) -> dict | None:
+    llm_client = get_llm_client()
     prompt = f"""Create a personalized diabetes-support care plan from real Glyco data.
 
 Return ONLY valid JSON with these keys:
 direction: string
 prefer: array of 3-5 strings
 limit: array of 3-5 strings
-sample_day: array of 3 strings
+sample_day: array of 4 strings
 weekly_recommendations: array of 3-5 strings
 
 Rules:
@@ -167,6 +166,11 @@ Rules:
 - Use the latest reading, fasting/not-fasting label, risk, trend, Bayesian posterior, and Thompson-ranked recommendation.
 - Do not diagnose, prescribe, or change medication.
 - Be specific to this patient's current data. Avoid generic wellness filler.
+- The "sample_day" array MUST contain exactly 4 strings, representing Breakfast, Lunch, Dinner, and Snack in that order.
+- Each meal MUST be a highly realistic, professional, diabetic-appropriate meal/recipe.
+- You MUST use metric units exclusively for ingredients and quantities (e.g. grams (g), milliliters (ml), liters (l) instead of ounces, pounds, cups, tablespoons, or teaspoons). Every single ingredient in the list MUST specify its metric quantity (e.g. "- 100g spinach", "- 15ml olive oil", "- 120ml yogurt"). DO NOT use imperial units or non-standard measurements.
+- The format for each meal MUST be structured explicitly with: Meal Name, followed by a list of ingredients with each ingredient on a new line starting with a hyphen (e.g. '- 100g spinach', '- 15ml olive oil'), followed by a step-by-step preparation instruction.
+- Ensure the ingredient list is rendered clearly in bullet points with newlines.
 
 Context JSON:
 {json.dumps(context, default=str)}
@@ -174,30 +178,40 @@ Context JSON:
 Safe fallback plan to improve, not ignore:
 {json.dumps(fallback, default=str)}"""
     try:
-        response = httpx.post(
-            f"{base_url}/models/{model}:generateContent",
-            headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
-            json={
-                "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-                "generationConfig": {"temperature": 0.25, "topP": 0.85, "maxOutputTokens": 1200},
-            },
-            timeout=float(os.getenv("GLYCO_GEMINI_TIMEOUT_SECONDS", "45")),
-        )
-        response.raise_for_status()
-        parts = response.json().get("candidates", [{}])[0].get("content", {}).get("parts", [])
-        text = "".join(part.get("text", "") for part in parts).strip()
-        if text.startswith("```"):
+        messages = [{"role": "user", "content": prompt}]
+        text = llm_client.generate(messages, {})
+        if not text:
+            return None
+        text = text.strip()
+        start_idx = text.find("{")
+        end_idx = text.rfind("}")
+        if start_idx != -1 and end_idx != -1:
+            text = text[start_idx : end_idx + 1]
+        elif text.startswith("```"):
             text = text.strip("`").removeprefix("json").strip()
-        plan = json.loads(text)
+        plan = json.loads(text, strict=False)
         if not all(isinstance(plan.get(key), list) for key in ("prefer", "limit", "sample_day", "weekly_recommendations")):
             return None
-        return {**fallback, **plan, "source": "gemini-personalized"}
+        
+        # Ensure sample_day has exactly 4 items, padding with fallback meals if necessary
+        plan_sample = plan.get("sample_day") or []
+        while len(plan_sample) < 4:
+            plan_sample.append(fallback["sample_day"][len(plan_sample)])
+        plan["sample_day"] = plan_sample[:4]
+
+        provider_name = getattr(llm_client, "provider_name", "personalized")
+        if provider_name == "deepseek":
+            model_name = getattr(llm_client, "model_name", "")
+            if "liquid" in str(model_name).lower():
+                provider_name = "liquid"
+        return {**fallback, **plan, "source": f"{provider_name}-personalized"}
     except Exception as exc:
-        logger.warning("Gemini care plan failed: %s", exc)
+        logger.warning("Personalized care plan generation failed: %s", exc)
         return None
 
 
 def build_care_plan(db: Session, user_id: int) -> dict:
     context = _plan_context(db, user_id)
     fallback = _fallback_plan(context)
-    return _gemini_plan(context, fallback) or fallback
+    return _personalized_plan(context, fallback) or fallback
+

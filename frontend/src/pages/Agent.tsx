@@ -1,7 +1,7 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { ArrowUp, ClipboardList, Database, History, RotateCcw, ShieldCheck, Sparkles } from "lucide-react";
 import type { ReactNode } from "react";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useRef, useEffect } from "react";
 import { api, type AgentChatResponse } from "../api/client";
 import { Badge, Card, EmptyState, ErrorState, LoadingState, PageHeader } from "../components/ui";
 import { appendAgentAssistantMessage, appendAgentUserMessage, resetAgentConversation, setAgentDraft, useAgentChatSession } from "../state/agentChatSession";
@@ -79,6 +79,7 @@ export function Agent() {
   const chatSession = useAgentChatSession();
   const [feedbackTone, setFeedbackTone] = useState("concise");
   const [historyOpen, setHistoryOpen] = useState(false);
+  const chatThreadRef = useRef<HTMLDivElement>(null);
   const risk = useQuery({ queryKey: ["risk"], queryFn: () => api.latestRisk() });
   const monitoring = useQuery({ queryKey: ["monitoring"], queryFn: () => api.latestMonitoring() });
   const logs = useQuery({ queryKey: ["logs"], queryFn: () => api.logs() });
@@ -87,27 +88,6 @@ export function Agent() {
   const chatHistory = useMemo(() => chatSession.messages.filter((message) => message.role === "user"), [chatSession.messages]);
   const llmLabel = latestResponse ? `${latestResponse.llm_mode}: ${latestResponse.llm_model}` : "fallback";
   const learning = latestResponse?.learning_summary;
-  const evidenceItems = (response: AgentChatResponse) => {
-    const calls = response.tool_calls.length
-      ? response.tool_calls.map((tool) => {
-          const forecast = tool.name === "forecast_context" || tool.name === "get_glucose_forecast";
-          const details = tool.details ?? {};
-          const trend = typeof details.trend_direction === "string" ? details.trend_direction : "unknown";
-          const highAlert = typeof details.predicted_high_alert === "boolean" ? details.predicted_high_alert : false;
-          const lowAlert = typeof details.predicted_low_alert === "boolean" ? details.predicted_low_alert : false;
-          return {
-            label: forecast ? "Forecast" : `${tool.label ?? tool.name}: ${tool.result_summary ?? tool.status}`,
-            forecast,
-            title: forecast ? `Trend: ${trend} | High alert: ${highAlert} | Low alert: ${lowAlert}` : undefined,
-          };
-        })
-      : (response.tools_used ?? []).map((name) => ({
-          label: name === "forecast_context" || name === "get_glucose_forecast" ? "Forecast" : `${name}: used`,
-          forecast: name === "forecast_context" || name === "get_glucose_forecast",
-          title: name === "forecast_context" || name === "get_glucose_forecast" ? "Trend: available | High alert: see forecast" : undefined,
-        }));
-    return calls;
-  };
   const chat = useMutation({
     mutationFn: (message: string) => api.agentChat(message),
     onSuccess: (response, message) => {
@@ -129,6 +109,25 @@ export function Agent() {
       appendAgentAssistantMessage("Feedback saved. Glyco will use it to personalize the next answer.");
     },
   });
+  const resetMemory = useMutation({
+    mutationFn: () => api.resetAgentMemory(),
+    onSuccess: () => {
+      resetAgentConversation();
+    },
+    onError: () => {
+      resetAgentConversation();
+    },
+  });
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (chatThreadRef.current) {
+        chatThreadRef.current.scrollTop = chatThreadRef.current.scrollHeight;
+      }
+    }, 60);
+    return () => clearTimeout(timer);
+  }, [chatSession.messages, chat.isPending]);
+
   const submit = (message = chatSession.draft) => {
     const trimmed = message.trim();
     if (!trimmed || chat.isPending) return;
@@ -148,7 +147,7 @@ export function Agent() {
             <div className="chat-history-panel">
               <header>
                 <strong>Chat history</strong>
-                <button type="button" className="icon-button" onClick={resetAgentConversation} aria-label="Start a new chat"><RotateCcw size={15} /></button>
+                <button type="button" className="icon-button" onClick={() => resetMemory.mutate()} disabled={resetMemory.isPending} aria-label="Start a new chat"><RotateCcw size={15} /></button>
               </header>
               {chatHistory.length ? (
                 <div className="chat-history-list">
@@ -165,28 +164,11 @@ export function Agent() {
           <div className="prompt-row">
             {quickPrompts.map((prompt) => <button key={prompt} className="secondary" type="button" onClick={() => submit(prompt)}>{prompt}</button>)}
           </div>
-          <div className="chat-thread" aria-live="polite">
+          <div ref={chatThreadRef} className="chat-thread" aria-live="polite">
             {chatSession.messages.map((message, index) => (
               <article className={`chat-message ${message.role}`} key={`${message.role}-${index}`}>
                 <span>{message.role === "assistant" ? "Glyco" : "You"}</span>
                 {message.role === "assistant" ? <FormattedResponse content={message.content} /> : <p>{message.content}</p>}
-                {message.response && (
-                  <div className="agent-evidence">
-                    {message.response.proactive_alert && <div className="proactive-banner">Proactive alert generated from recent glucose readings.</div>}
-                    <strong>Tools used</strong>
-                    <div className="tool-list">
-                      {evidenceItems(message.response).map((item, itemIndex) => <span className={item.forecast ? "forecast-tool-badge" : undefined} key={`${item.label}-${itemIndex}`} title={item.title}>{item.label}</span>)}
-                    </div>
-                    <strong>Learning signal</strong>
-                    <p>{message.response.learning_summary.adaptation_note}</p>
-                    {message.response.recommendations?.[0] && (
-                      <>
-                        <strong>Next-best action</strong>
-                        <p>{message.response.recommendations[0].title}</p>
-                      </>
-                    )}
-                  </div>
-                )}
               </article>
             ))}
             {chat.isPending && <LoadingState label="Glyco is checking profile, logs, models, and guidance" />}

@@ -219,9 +219,11 @@ export const api = {
   reportPdfUrl: (reportId: number, inline = false) => `${API_BASE}/reports/${reportId}/pdf${inline ? "?inline=1" : ""}`,
   insight: (userId = 1) => request<GlycoInsight>(`/agent/insight/${userId}`),
   agentChat: (message: string, userId = 1) => request<AgentChatResponse>("/agent/chat", { method: "POST", body: JSON.stringify({ user_id: userId, message }) }),
+  resetAgentMemory: (userId = 1) => request<{ status: string }>(`/agent/reset?user_id=${userId}`, { method: "POST" }),
   agentFeedback: (payload: { user_id?: number; message: string; helpful: boolean; preferred_tone: string; confirmed_action?: string; notes?: string }) => request<AgentFeedback>("/agent/feedback", { method: "POST", body: JSON.stringify({ user_id: 1, ...payload }) }),
   proactiveCheck: (userId = 1) => request<Record<string, unknown>>(`/agent/proactive-check/${userId}`, { method: "POST" }),
   alerts: (userId = 1) => request<AgentAlert[]>(`/alerts/${userId}`),
-  diet: (userId = 1) => request<CarePlan>(`/care-plan/diet?user_id=${userId}`, { method: "POST" }),
+  diet: (userId = 1, forceRefresh = false) => request<CarePlan>(`/care-plan/diet?user_id=${userId}&force_refresh=${forceRefresh}`, { method: "POST" }),
   familyShare: (token = "demo-family-sarah") => request<Record<string, unknown>>(`/family-shares/${token}`),
+  createFamilyShare: (payload: { user_id: number; shared_with_name: string; relationship: string }) => request<{ share_token: string; url: string }>("/family-shares", { method: "POST", body: JSON.stringify(payload) }),
 };

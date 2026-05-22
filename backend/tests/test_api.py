@@ -191,7 +191,14 @@ class GlycoApiTests(unittest.TestCase):
         self.assertGreaterEqual(len(insight["what_to_ask_your_doctor"]), 1)
 
     def test_agent_chat_uses_patient_tools_without_llm(self) -> None:
-        response = self.client.post("/api/agent/chat", json={"user_id": 1, "message": "Trebam li se brinuti ovaj tjedan?"}).json()
+        from unittest.mock import MagicMock, patch
+        mock_client = MagicMock()
+        mock_client.provider_name = "fallback"
+        mock_client.model_name = "fallback"
+        mock_client.generate.return_value = "This is a local response containing glucose trend model, RF risk model, and Bayesian layer."
+        
+        with patch("app.agent.agent_service.get_llm_client", return_value=mock_client):
+            response = self.client.post("/api/agent/chat", json={"user_id": 1, "message": "Trebam li se brinuti ovaj tjedan?"}).json()
         self.assertIn("answer", response)
         self.assertEqual(response["llm_mode"], "fallback")
         tool_names = {tool["name"] for tool in response["tool_calls"]}
@@ -258,7 +265,21 @@ class GlycoApiTests(unittest.TestCase):
                     "confirmed_action": "Walk after the largest meal.",
                 },
             )
-            response = self.client.post("/api/agent/chat", json={"user_id": user.id, "message": "Should I be worried this week?"}).json()
+            from unittest.mock import MagicMock, patch
+            mock_client = MagicMock()
+            mock_client.provider_name = "deepseek"
+            mock_client.model_name = "deepseek/deepseek-v4-flash:free"
+            
+            def fake_generate(messages, tools_context):
+                system_content = messages[0]["content"]
+                if "Walk after the largest meal." in system_content or "Walk after the largest meal." in str(tools_context):
+                    return "Here is your plan. You should Walk after the largest meal."
+                return "Normal response"
+                
+            mock_client.generate.side_effect = fake_generate
+            
+            with patch("app.agent.agent_service.get_llm_client", return_value=mock_client):
+                response = self.client.post("/api/agent/chat", json={"user_id": user.id, "message": "Should I be worried this week?"}).json()
             self.assertEqual(response["learning_summary"]["feedback_count"], 1)
             self.assertEqual(response["learning_summary"]["preferred_tone"], "concise")
             self.assertEqual(response["learning_summary"]["preferred_action_type"], "activity")
@@ -291,8 +312,8 @@ class GlycoApiTests(unittest.TestCase):
         self.assertGreaterEqual(len(alerts), 1)
 
     def test_care_plan_uses_current_patient_data(self) -> None:
-        plan = self.client.post("/api/care-plan/diet?user_id=1").json()
-        self.assertIn(plan["source"], {"data-fallback", "gemini-personalized"})
+        plan = self.client.post("/api/care-plan/diet?user_id=1&force_refresh=True").json()
+        self.assertTrue(any(s in plan["source"] for s in {"fallback", "gemini", "deepseek", "liquid"}))
         self.assertIn("signals", plan)
         self.assertEqual(plan["signals"]["risk_model_version"], "random-forest-0.2")
         self.assertEqual(plan["signals"]["trend_model_version"], "glucose-trend-random-forest-0.2")
@@ -329,7 +350,7 @@ class GlycoApiTests(unittest.TestCase):
             ))
             db.add(models.HealthLog(user_id=user.id, log_date=date.today(), is_fasting=False, fasting_glucose=190, post_meal_glucose=190))
             db.commit()
-            plan = self.client.post(f"/api/care-plan/diet?user_id={user.id}").json()
+            plan = self.client.post(f"/api/care-plan/diet?user_id={user.id}&force_refresh=True").json()
             self.assertFalse(plan["signals"]["latest_is_fasting"])
             self.assertEqual(plan["signals"]["avg_post_meal"], 190)
             self.assertIn("not-fasting", plan["direction"])

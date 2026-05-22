@@ -3,9 +3,8 @@ from __future__ import annotations
 from statistics import mean
 from sqlalchemy.orm import Session
 
-from app.agent.agentic_loop import run_gemini_agentic_chat
 from app.agent.bandit import RecommendationBandit, default_recommendations
-from app.agent.llm_client import get_llm_client, get_llm_status
+from app.agent.llm_client import get_llm_client, get_llm_status, build_rich_system_prompt
 from app.agent.safety import safety_note, urgent_message_if_needed
 from app.agent.tools import get_logs, get_profile, retrieve_guideline_snippets, run_risk_check, run_trend_check
 from app.db import models
@@ -267,6 +266,29 @@ async def _load_forecast_context(user_id: int, db: Session) -> dict | None:
     return _load_forecast_context_sync(user_id, db)
 
 
+def _get_care_plan_for_agent(db: Session, user_id: int) -> dict:
+    """
+    Retrieve the latest cached diet care plan from the database.
+    If no cached plan is found, fall back to calculating the local fallback plan.
+    This avoids nesting external LLM API calls during a chat session.
+    """
+    cached = (
+        db.query(models.Report)
+        .filter(
+            models.Report.user_id == user_id,
+            models.Report.report_type == "diet_care_plan",
+        )
+        .order_by(models.Report.created_at.desc())
+        .first()
+    )
+    if cached and cached.content_json:
+        return cached.content_json
+    
+    from app.services.care_plan import _plan_context, _fallback_plan
+    context = _plan_context(db, user_id)
+    return _fallback_plan(context)
+
+
 def _risk_tool_label(model_version: str) -> str:
     return "Trained RF risk model" if model_version == "random-forest-0.2" else "Risk fallback scorer"
 
@@ -286,6 +308,8 @@ def build_agent_tool_pipeline(db: Session, user_id: int, message: str) -> dict:
     learning = _learning_summary(db, user_id)
     forecast = _load_forecast_context_sync(user_id, db)
     recommendations = RecommendationBandit(db, user_id).rerank(default_recommendations(), limit=3, forecast=forecast)
+    care_plan = _get_care_plan_for_agent(db, user_id)
+    
     risk_version = risk.get("model_version", "unavailable")
     trend_version = trend.get("model_version", "unavailable")
     posterior = bayesian.get("posterior_mean")
@@ -316,6 +340,7 @@ def build_agent_tool_pipeline(db: Session, user_id: int, message: str) -> dict:
         ),
         _tool_call("retrieve_guidelines", "Guidance retrieval", f"{len(snippets)} curated snippets"),
         _tool_call("read_agent_learning_memory", "Agent learning memory", learning["adaptation_note"], details=learning),
+        _tool_call("retrieve_care_plan", "Care plan loader", f"Loaded care plan (source: {care_plan.get('source', 'unknown')})"),
         *(
             [
                 _tool_call(
@@ -345,75 +370,26 @@ def build_agent_tool_pipeline(db: Session, user_id: int, message: str) -> dict:
         "learning": learning,
         "forecast": forecast,
         "recommendations": recommendations,
+        "care_plan": care_plan,
         "tool_calls": tool_calls,
     }
 
 
-def _fallback_answer(message: str, risk: dict, trend: dict, bayesian: dict, logs: list[dict], snippets: list[dict], urgent: str | None, learning: dict, forecast: dict | None = None) -> str:
-    if urgent:
-        return urgent
-    local_language = any(term in message.lower() for term in {"trebam", "brinuti", "sta", "doktor", "porodica", "sedmic", "tjedan"})
-    glucose = [item["fasting_glucose"] for item in logs if item.get("fasting_glucose") is not None]
-    avg = round(mean(glucose), 1) if glucose else None
-    risk_level = risk.get("risk_level", "unknown")
-    risk_version = risk.get("model_version", "unavailable")
-    trend_label = trend.get("trend_label", "unknown")
-    trend_version = trend.get("model_version", "unavailable")
-    risk_source = "RF risk model" if risk_version == "random-forest-0.2" else "risk fallback scorer"
-    trend_source = "glucose trend model" if trend_version == "glucose-trend-random-forest-0.2" else "monitoring fallback scorer"
-    posterior = bayesian.get("posterior_mean")
-    posterior_text = f"{posterior:.2f}" if isinstance(posterior, (int, float)) else "unknown"
-    preferred_tone = learning.get("preferred_tone", "balanced")
-    confirmed_actions = learning.get("confirmed_actions", [])
-    next_action = learning.get("next_best_action") or {}
-    pattern = learning.get("recent_glucose_pattern") or {}
-    forecast_sentence = ""
-    if forecast:
-        forecast_sentence = (
-            f" Forecast estimate: {forecast['trend_direction']} over the next 4 hours, "
-            f"with +60 min around {forecast['predictions']['60']} mmol/L; forecasts are estimates."
-        )
-    if local_language:
-        parts = [f"Tvoj {trend_source} ({trend_version}) trenutno vidi obrazac kao {trend_label}. {risk_source} ({risk_version}) procjenjuje {risk_level} rizik."]
-        parts.append(f"Bayesian layer izgladjuje taj risk signal kroz vrijeme; trenutni posterior je {posterior_text}.")
-        if avg is not None:
-            parts.append(f"Prosjek zadnjih glucose ocitanja u vidljivom periodu je {avg} mg/dL.")
-        if forecast_sentence:
-            parts.append(forecast_sentence)
-        if trend_label in {"watch", "concerning"} or risk_level == "high":
-            parts.append("Ove sedmice vrijedi obratiti paznju: nastavi unositi ocitanja, pogledaj zadnje obroke/aktivnost i pripremi doctor summary ako povisene vrijednosti potraju.")
-        else:
-            parts.append("Trenutni obrazac izgleda stabilnije, pa je glavni korak dosljedno logovanje i pracenje promjena.")
-        if next_action:
-            parts.append(f"Zbog recent pattern={pattern.get('label', 'unknown')} i naucenog fokusa={learning.get('preferred_action_type', 'monitoring')}, Glyco preporucuje {next_action.get('title')}: {next_action.get('body')}")
-        if snippets:
-            parts.append(f"Guidance note: {snippets[0]['text']}")
-        if confirmed_actions:
-            parts.append(f"Agent je zapamtio ranije potvrdjen korak: {confirmed_actions[0]}.")
-        if preferred_tone != "balanced":
-            parts.append(f"Odgovor je prilagodjen tvom feedbacku: stil {preferred_tone}.")
-    else:
-        parts = [f"Your {trend_source} ({trend_version}) currently sees this as {trend_label}. The {risk_source} ({risk_version}) estimates {risk_level} risk."]
-        parts.append(f"The Bayesian layer smooths the RF risk signal over time; the current posterior is {posterior_text}.")
-        if avg is not None:
-            parts.append(f"Your recent average glucose over the visible log window is {avg} mg/dL.")
-        if forecast_sentence:
-            parts.append(forecast_sentence)
-        if trend_label in {"watch", "concerning"} or risk_level == "high":
-            parts.append("This is worth paying attention to this week: keep logging, review recent meals, and prepare a doctor summary if elevated readings continue.")
-        else:
-            parts.append("The current pattern looks more stable, so the main action is to keep logging consistently and watch for changes.")
-        if next_action:
-            parts.append(f"Because your recent pattern is {pattern.get('label', 'unknown')} and learned focus is {learning.get('preferred_action_type', 'monitoring')}, Glyco recommends {next_action.get('title')}: {next_action.get('body')}")
-        if pattern.get("label"):
-            parts.append(f"I chose that focus from your recent glucose pattern: {pattern['label']}.")
-        if snippets:
-            parts.append(f"Grounding note: {snippets[0]['text']}")
-        if confirmed_actions:
-            parts.append(f"I also remembered a previously confirmed action: {confirmed_actions[0]}.")
-        if preferred_tone != "balanced":
-            parts.append(f"This answer is adapted from your feedback preference: {preferred_tone} tone.")
-    return " ".join(parts)
+def _load_chat_history(db: Session, user_id: int, limit: int = 10) -> list[dict]:
+    rows = (
+        db.query(models.AgentMemory)
+        .filter(models.AgentMemory.user_id == user_id)
+        .order_by(models.AgentMemory.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    return [{"role": r.role, "content": r.content} for r in reversed(rows)]
+
+
+def _save_chat_message(db: Session, user_id: int, role: str, content: str) -> None:
+    row = models.AgentMemory(user_id=user_id, role=role, content=content)
+    db.add(row)
+    db.commit()
 
 
 def _is_low_quality_llm_answer(answer: str | None) -> bool:
@@ -436,64 +412,84 @@ def chat_with_agent(db: Session, user_id: int, message: str) -> dict:
     """Build an agent response from trained-model tools and adaptive memory."""
     user = db.get(models.User, user_id)
     urgent = urgent_message_if_needed(message)
-    if not urgent:
-        agentic = run_gemini_agentic_chat(db, user_id, message)
-        if agentic and not _is_low_quality_llm_answer(agentic.get("answer")):
-            context = agentic["context"]
-            forecast = _load_forecast_context_sync(user_id, db)
-            if forecast is not None:
-                context["forecast"] = forecast
-                agentic["tool_calls"].append(
-                    _tool_call(
-                        "forecast_context",
-                        "Forecast",
-                        f"{forecast['trend_direction']} forecast via {forecast['model_version']}",
-                        details=forecast,
-                    )
-                )
-            return {
-                "answer": agentic["answer"],
-                "tool_calls": agentic["tool_calls"],
-                "guideline_snippets": context["guidelines"],
-                "safety_note": safety_note(),
-                "patient_name": user.full_name if user else "Demo patient",
-                "llm_mode": agentic["llm_mode"],
-                "llm_model": agentic["llm_model"],
-                "learning_summary": context["learning"],
-                "recommendations": context["recommendations"],
-            }
+    
+    if urgent:
+        tools_context = build_agent_tool_pipeline(db, user_id, message)
+        return {
+            "answer": urgent,
+            "tool_calls": tools_context["tool_calls"],
+            "guideline_snippets": tools_context["guidelines"],
+            "safety_note": safety_note(),
+            "patient_name": user.full_name if user else "Demo patient",
+            "llm_mode": "safety",
+            "llm_model": "urgent-safety",
+            "learning_summary": tools_context["learning"],
+            "recommendations": tools_context["recommendations"],
+        }
 
     tools_context = build_agent_tool_pipeline(db, user_id, message)
-    messages = [
-        {"role": "system", "content": "You are Glyco, a careful diabetes risk and monitoring assistant. Do not diagnose. Use the tool context and adapt to the user's saved feedback."},
-        {"role": "user", "content": message},
-    ]
+    
+    # 1. Load history from AgentMemory (continuity of last 10 messages)
+    history = _load_chat_history(db, user_id, limit=10)
+    
+    # 2. Build detailed system prompt
+    system_prompt = build_rich_system_prompt(tools_context)
+    
+    # 3. Assemble full messages list
+    messages = [{"role": "system", "content": system_prompt}] + history + [{"role": "user", "content": message}]
+    
     llm_client = get_llm_client()
-    llm_answer = None if urgent else llm_client.generate(messages, tools_context)
+    llm_answer = llm_client.generate(messages, tools_context)
+    
     if _is_low_quality_llm_answer(llm_answer):
         llm_answer = None
-    answer = llm_answer or _fallback_answer(
-        message,
-        tools_context["risk"],
-        tools_context["trend"],
-        tools_context["bayesian"],
-        tools_context["logs"],
-        tools_context["guidelines"],
-        urgent,
-        tools_context["learning"],
-        tools_context["forecast"],
-    )
+        
     llm_status = get_llm_status()
-    llm_provider = getattr(llm_client, "provider_name", "configured") if llm_answer else "fallback"
-    llm_model = getattr(llm_client, "model_name", "configured") if llm_answer else "fallback"
+    llm_error_detail = None
+    for candidate in getattr(llm_client, "clients", []) or []:
+        detail = getattr(candidate, "last_error", None)
+        if detail:
+            llm_error_detail = str(detail)
+            break
+
+    if not llm_answer:
+        hint = "Please verify your LLM provider API key and try again."
+        if llm_status.get("provider") == "deepseek":
+            deepseek_url = (llm_status.get("deepseek") or {}).get("url", "")
+            if "openrouter.ai" in str(deepseek_url).lower():
+                hint = "If you're using an OpenRouter key, you may need credits/billing enabled (OpenRouter can return HTTP 402)."
+            else:
+                hint = "Set DEEPSEEK_API_KEY (or OPENROUTER_API_KEY) and ensure the model/url are valid."
+        elif llm_status.get("provider") == "gemini":
+            hint = "Set GEMINI_API_KEY and try again."
+        elif llm_status.get("provider") == "groq":
+            hint = "Set GROQ_API_KEY and ensure the model/url are valid."
+        elif llm_status.get("provider") == "ollama":
+            hint = "Ensure Ollama is running and GLYCO_OLLAMA_URL is reachable."
+
+        detail_suffix = f" (Details: {llm_error_detail})" if llm_error_detail else ""
+        answer = f"Error: Glyco chatbot couldn't reach the configured LLM provider.{detail_suffix} {hint}"
+        llm_mode = "error"
+        llm_model = "error"
+    else:
+        answer = llm_answer
+        llm_mode = getattr(llm_client, "provider_name", "configured")
+        llm_model = getattr(llm_client, "model_name", "configured")
+        if llm_model == "fallback":
+            llm_model = llm_status["model"]
+        
+        # Save both user query and assistant response to conversational history memory
+        _save_chat_message(db, user_id, "user", message)
+        _save_chat_message(db, user_id, "assistant", answer)
+        
     return {
         "answer": answer,
         "tool_calls": tools_context["tool_calls"],
         "guideline_snippets": tools_context["guidelines"],
         "safety_note": safety_note(),
         "patient_name": user.full_name if user else "Demo patient",
-        "llm_mode": llm_provider if llm_answer else "fallback",
-        "llm_model": llm_model if llm_answer else llm_status["model"],
+        "llm_mode": llm_mode,
+        "llm_model": llm_model,
         "learning_summary": tools_context["learning"],
         "recommendations": tools_context["recommendations"],
     }

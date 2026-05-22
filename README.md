@@ -424,11 +424,20 @@ The compose file maps the backend to port `8000` and the frontend to port `80`.
 Optional environment variables:
 
 - `DATABASE_URL` to point the backend at a custom database
-- `GLYCO_LLM_PROVIDER` to choose `gemini` or `ollama`
+- `GLYCO_LLM_PROVIDER` to choose `deepseek`, `gemini`, or `ollama`
+- `DEEPSEEK_API_KEY` / `GLYCO_DEEPSEEK_API_KEY` to enable the DeepSeek/OpenRouter chat-completions client
+- `OPENROUTER_API_KEY` / `GLYCO_OPENROUTER_API_KEY` as an alias key name when using OpenRouter
+- `GLYCO_DEEPSEEK_MODEL` to pick the model (default: `deepseek/deepseek-v4-flash:free`)
+- `GLYCO_DEEPSEEK_URL` to choose the OpenAI-compatible base URL (default: `https://openrouter.ai/api/v1`)
 - `GEMINI_API_KEY` or `GLYCO_GEMINI_API_KEY` to enable the Gemini function-calling agent
 - `GLYCO_OLLAMA_URL` and `GLYCO_OLLAMA_MODEL` to enable local Ollama verbalization
 
 If no database URL is provided, Glyco uses a local SQLite file path. If no LLM provider is configured, the agent uses fallback behavior.
+
+Notes:
+
+- For local runs, the backend loads a `.env` file from the repo root or `backend/.env`.
+- If you use OpenRouter, some models marked as `:free` can still return `402 Payment Required` unless your OpenRouter account has credits/billing enabled.
 
 ## Training The Models
 

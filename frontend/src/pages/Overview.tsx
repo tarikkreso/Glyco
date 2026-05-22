@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { ArrowUp, Maximize2, MessageSquareText, Sparkles, X } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { Badge, ErrorState, LoadingState } from "../components/ui";
@@ -151,6 +151,7 @@ export function Overview() {
   const [chatExpanding, setChatExpanding] = useState(false);
   const [avatarActivated, setAvatarActivated] = useState(false);
   const chatSession = useAgentChatSession();
+  const chatThreadRef = useRef<HTMLDivElement>(null);
 
   const risk = useQuery({ queryKey: ["risk"], queryFn: () => api.latestRisk() });
   const monitoring = useQuery({ queryKey: ["monitoring"], queryFn: () => api.latestMonitoring() });
@@ -202,6 +203,15 @@ export function Overview() {
       appendAgentAssistantMessage("I could not reach the agent service. Try again after the API is available.");
     },
   });
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (chatOpen && chatThreadRef.current) {
+        chatThreadRef.current.scrollTop = chatThreadRef.current.scrollHeight;
+      }
+    }, 80);
+    return () => clearTimeout(timer);
+  }, [chatSession.messages, chat.isPending, chatOpen]);
 
   const submit = (message = chatSession.draft) => {
     const trimmed = message.trim();
@@ -359,7 +369,7 @@ export function Overview() {
               </button>
             </div>
           </header>
-          <div className="glyco-chat-thread" aria-live="polite">
+          <div ref={chatThreadRef} className="glyco-chat-thread" aria-live="polite">
             {chatSession.messages.map((message, index) => (
               <article className={`glyco-chat-message ${message.role}`} key={`${message.role}-${index}`}>
                 <span>{message.role === "assistant" ? "Glyco" : "You"}</span>

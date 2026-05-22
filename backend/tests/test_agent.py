@@ -114,9 +114,17 @@ def test_not_fasting_readings_do_not_trigger_fasting_anomaly() -> None:
 
 def test_agent_chat_without_external_llm_uses_fallback(monkeypatch) -> None:
     """Missing external LLM configuration still returns a tool-grounded response."""
-    monkeypatch.delenv("GLYCO_LLM_PROVIDER", raising=False)
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    monkeypatch.delenv("GLYCO_GEMINI_API_KEY", raising=False)
+    # Use empty-string env vars (not delenv) so the app's .env loader cannot
+    # re-populate keys later in the same test run.
+    monkeypatch.setenv("GLYCO_LLM_PROVIDER", "")
+    monkeypatch.setenv("GEMINI_API_KEY", "")
+    monkeypatch.setenv("GLYCO_GEMINI_API_KEY", "")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "")
+    monkeypatch.setenv("GLYCO_DEEPSEEK_API_KEY", "")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "")
+    monkeypatch.setenv("GLYCO_OPENROUTER_API_KEY", "")
+    monkeypatch.setenv("GROQ_API_KEY", "")
+    monkeypatch.setenv("GLYCO_GROQ_API_KEY", "")
     db = SessionLocal()
     user = _create_user(db, "agent-fallback")
     try:
@@ -135,79 +143,137 @@ def test_agent_chat_without_external_llm_uses_fallback(monkeypatch) -> None:
         db.close()
 
 
-def test_gemini_agentic_loop_calls_tools_before_answering(monkeypatch) -> None:
-    """Configured Gemini path uses function calls, not precomputed tool context."""
-    monkeypatch.setenv("GLYCO_LLM_PROVIDER", "gemini")
-    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+def test_agent_history_memory() -> None:
+    """The chatbot preserves conversation history in the SQLite AgentMemory table."""
+    # Ensure tests don't accidentally call external LLMs when devs have keys set.
+    import os
 
-    required_calls = [
-        "get_patient_profile",
-        "get_glucose_logs",
-        "run_trained_risk_model",
-        "get_bayesian_risk_state",
-        "run_trained_glucose_trend_model",
-        "retrieve_guidelines",
-        "read_agent_learning_memory",
-        "rank_recommendations_with_thompson_sampling",
-    ]
-    responses = [
-        {
-            "candidates": [
-                {
-                    "content": {
-                        "parts": [
-                            {"functionCall": {"name": name, "args": {"query": "Should I worry?", "days": 7, "limit": 3}}}
-                            for name in required_calls
-                        ]
-                    },
-                    "finishReason": "STOP",
-                }
-            ]
-        },
-        {
-            "candidates": [
-                {
-                    "content": {
-                        "parts": [
-                            {
-                                "text": (
-                                    "Bottom line\n"
-                                    "- Glyco used the live tools first and then answered. "
-                                    "The RF risk model, trend model, Bayesian layer, and Thompson ranker were checked."
-                                )
-                            }
-                        ]
-                    },
-                    "finishReason": "STOP",
-                }
-            ]
-        },
-    ]
+    for name in (
+        "GLYCO_LLM_PROVIDER",
+        "DEEPSEEK_API_KEY",
+        "GLYCO_DEEPSEEK_API_KEY",
+        "OPENROUTER_API_KEY",
+        "GLYCO_OPENROUTER_API_KEY",
+        "GEMINI_API_KEY",
+        "GLYCO_GEMINI_API_KEY",
+        "GROQ_API_KEY",
+        "GLYCO_GROQ_API_KEY",
+    ):
+        os.environ[name] = ""
 
-    def fake_post(*args, **kwargs):
-        payload = responses.pop(0)
-        return SimpleNamespace(raise_for_status=lambda: None, json=lambda: payload)
-
-    monkeypatch.setattr("app.agent.agentic_loop.httpx.post", fake_post)
     db = SessionLocal()
-    user = _create_user(db, "agentic-gemini")
+    user = _create_user(db, "agent-memory-test")
     try:
-        for idx in range(4):
-            db.add(models.HealthLog(user_id=user.id, log_date=date.today() - timedelta(days=3 - idx), fasting_glucose=120 + idx * 8))
+        # Clear any existing history first
+        db.query(models.AgentMemory).filter(models.AgentMemory.user_id == user.id).delete()
         db.commit()
-        result = chat_with_agent(db, user.id, "Should I worry this week?")
-        assert result["llm_mode"] == "gemini-agentic"
-        assert {tool["name"] for tool in result["tool_calls"]}.issuperset(required_calls)
-        assert result["recommendations"]
-        assert result["learning_summary"]["recent_glucose_pattern"]["label"] in {"watch", "needs-attention", "steady"}
+
+        # First turn
+        chat_with_agent(db, user.id, "Hi, I am Nedim.")
+        history1 = db.query(models.AgentMemory).filter(models.AgentMemory.user_id == user.id).order_by(models.AgentMemory.created_at.asc()).all()
+        assert len(history1) == 2
+        assert history1[0].role == "user"
+        assert history1[0].content == "Hi, I am Nedim."
+        assert history1[1].role == "assistant"
+
+        # Second turn
+        chat_with_agent(db, user.id, "What is my name?")
+        history2 = db.query(models.AgentMemory).filter(models.AgentMemory.user_id == user.id).order_by(models.AgentMemory.created_at.asc()).all()
+        assert len(history2) == 4
+        assert history2[2].content == "What is my name?"
     finally:
-        db.query(models.AgentFeedback).filter(models.AgentFeedback.user_id == user.id).delete()
+        db.query(models.AgentMemory).filter(models.AgentMemory.user_id == user.id).delete()
         db.query(models.BanditArmState).filter(models.BanditArmState.user_id == user.id).delete()
         db.query(models.BayesianRiskState).filter(models.BayesianRiskState.user_id == user.id).delete()
         db.query(models.RiskAssessment).filter(models.RiskAssessment.user_id == user.id).delete()
         db.query(models.MonitoringAssessment).filter(models.MonitoringAssessment.user_id == user.id).delete()
-        db.query(models.HealthLog).filter(models.HealthLog.user_id == user.id).delete()
         db.query(models.Profile).filter(models.Profile.user_id == user.id).delete()
         db.query(models.User).filter(models.User.id == user.id).delete()
         db.commit()
         db.close()
+
+
+def test_rich_system_prompt_diet_meal_support() -> None:
+    """The rich system prompt contains Diet & Meal Support rules and Patient personalized diet care plan."""
+    from app.agent.llm_client import build_rich_system_prompt
+    db = SessionLocal()
+    user = _create_user(db, "prompt-diet-test")
+    try:
+        pipeline_context = build_agent_tool_pipeline(db, user.id, "what should I eat?")
+        system_prompt = build_rich_system_prompt(pipeline_context)
+        
+        # Check that prompt contains key terms we injected
+        assert "Diet & Meal Support" in system_prompt
+        assert "PATIENT PERSONALIZED DIET CARE PLAN:" in system_prompt
+        assert "CURRENT TIME OF DAY:" in system_prompt
+    finally:
+        db.query(models.BanditArmState).filter(models.BanditArmState.user_id == user.id).delete()
+        db.query(models.BayesianRiskState).filter(models.BayesianRiskState.user_id == user.id).delete()
+        db.query(models.RiskAssessment).filter(models.RiskAssessment.user_id == user.id).delete()
+        db.query(models.MonitoringAssessment).filter(models.MonitoringAssessment.user_id == user.id).delete()
+        db.query(models.Profile).filter(models.Profile.user_id == user.id).delete()
+        db.query(models.User).filter(models.User.id == user.id).delete()
+        db.commit()
+        db.close()
+
+
+def test_prompt_translation_and_direct_answer() -> None:
+    """Ensure prompt builders contain translation guidelines and direct answer instructions."""
+    from app.agent.llm_client import build_rich_system_prompt, _build_concise_prompt
+    db = SessionLocal()
+    user = _create_user(db, "prompt-trans-test")
+    try:
+        pipeline_context = build_agent_tool_pipeline(db, user.id, "da li se moze kineskom metodom pijenjem samo tople vode izlijeciti secer")
+        system_prompt = build_rich_system_prompt(pipeline_context)
+        
+        # Check that system prompt contains language & translation + direct answer guidelines
+        assert "Language & Translation" in system_prompt
+        assert "Direct Answer First" in system_prompt
+        assert "Bosnian, Croatian, Serbian" in system_prompt
+        assert "Zaključak" in system_prompt
+        assert "warm water" in system_prompt
+
+        # Check concise prompt contains same guidelines
+        messages = [{"role": "user", "content": "da li se moze kineskom metodom pijenjem samo tople vode izlijeciti secer"}]
+        concise_prompt = _build_concise_prompt(messages, pipeline_context)
+        assert "Language & Translation" in concise_prompt
+        assert "Direct Answer First" in concise_prompt
+        assert "warm water" in concise_prompt
+    finally:
+        db.query(models.BanditArmState).filter(models.BanditArmState.user_id == user.id).delete()
+        db.query(models.BayesianRiskState).filter(models.BayesianRiskState.user_id == user.id).delete()
+        db.query(models.RiskAssessment).filter(models.RiskAssessment.user_id == user.id).delete()
+        db.query(models.MonitoringAssessment).filter(models.MonitoringAssessment.user_id == user.id).delete()
+        db.query(models.Profile).filter(models.Profile.user_id == user.id).delete()
+        db.query(models.User).filter(models.User.id == user.id).delete()
+        db.commit()
+        db.close()
+
+
+def test_groq_client_integration() -> None:
+    """Verify that GroqClient compiles and integrates correctly into provider order and status check."""
+    import os
+    from app.agent.llm_client import _provider_order, get_llm_status, GroqClient, get_llm_client
+    
+    # Temporarily set keys
+    os.environ["GROQ_API_KEY"] = "gsk_test_key"
+    os.environ["GEMINI_API_KEY"] = "gemini_test_key"
+    
+    try:
+        order = _provider_order()
+        assert "groq" in order
+        assert order[0] == "groq"  # Defaults to groq first when present and provider unset
+        
+        status = get_llm_status()
+        assert status["groq"]["configured"] is True
+        assert status["groq"]["model"] == "llama-3.3-70b-versatile"
+        
+        client = get_llm_client()
+        # Verify groq is in the chain
+        providers = [getattr(c, "provider_name", "") for c in client.clients]
+        assert "groq" in providers
+    finally:
+        os.environ.pop("GROQ_API_KEY", None)
+        os.environ.pop("GEMINI_API_KEY", None)
+
+

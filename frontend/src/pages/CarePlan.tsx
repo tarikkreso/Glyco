@@ -1,4 +1,5 @@
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Apple,
   CalendarDays,
@@ -26,15 +27,96 @@ function readingKind(value?: boolean) {
 }
 
 function sourceLabel(source?: string) {
-  if (source === "gemini-personalized") return "LLM personalized";
-  if (source === "data-fallback" || source === "data-personalized-fallback") return "Data personalized";
+  if (source === "gemini-personalized") return "Gemini Personalized";
+  if (source === "deepseek-personalized") return "DeepSeek Personalized";
+  if (source === "liquid-personalized") return "Liquid Personalized";
+  if (source === "data-fallback" || source === "data-personalized-fallback") return "Data Personalized (Fallback)";
   return source ?? "Data generated";
 }
 
 const mealLabels = ["Breakfast", "Lunch", "Dinner", "Snack"];
 
+function renderMealText(item: string) {
+  const lines = item.split("\n");
+  const parsedElements: React.ReactNode[] = [];
+  let inList = false;
+  let listItems: string[] = [];
+
+  lines.forEach((line, index) => {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("-") || trimmed.startsWith("*")) {
+      if (!inList) {
+        inList = true;
+        listItems = [];
+      }
+      listItems.push(trimmed.substring(1).trim());
+    } else {
+      if (inList) {
+        parsedElements.push(
+          <ul key={`list-${index}`} style={{ margin: "8px 0", paddingLeft: "16px", listStyleType: "disc" }}>
+            {listItems.map((li, liIdx) => (
+              <li key={liIdx} style={{ marginBottom: "2px", fontWeight: "normal", color: "var(--text)" }}>{li}</li>
+            ))}
+          </ul>
+        );
+        inList = false;
+      }
+      
+      if (trimmed) {
+        if (index === 0 && (trimmed.endsWith(":") || trimmed.length < 50)) {
+          parsedElements.push(
+            <h4 key={`header-${index}`} style={{ fontWeight: 800, fontSize: "14px", margin: "0 0 6px 0", color: "var(--primary)" }}>
+              {trimmed.endsWith(":") ? trimmed.slice(0, -1) : trimmed}
+            </h4>
+          );
+        } else {
+          parsedElements.push(
+            <p key={`p-${index}`} style={{ margin: "6px 0", fontSize: "13px", fontWeight: "normal", color: "var(--muted)", lineHeight: "1.4" }}>
+              {trimmed}
+            </p>
+          );
+        }
+      }
+    }
+  });
+
+  if (inList) {
+    parsedElements.push(
+      <ul key="list-end" style={{ margin: "8px 0", paddingLeft: "16px", listStyleType: "disc" }}>
+        {listItems.map((li, liIdx) => (
+          <li key={liIdx} style={{ marginBottom: "2px", fontWeight: "normal", color: "var(--text)" }}>{li}</li>
+        ))}
+      </ul>
+    );
+  }
+
+  return <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>{parsedElements}</div>;
+}
+
 export function CarePlan() {
-  const plan = useQuery({ queryKey: ["diet"], queryFn: () => api.diet(), staleTime: 0 });
+  const queryClient = useQueryClient();
+  const [isGenerating, setIsGenerating] = useState(false);
+
+  const plan = useQuery({
+    queryKey: ["diet"],
+    queryFn: () => api.diet(1, false),
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  });
+
+  const handleGenerate = async () => {
+    setIsGenerating(true);
+    try {
+      const freshData = await api.diet(1, true);
+      queryClient.setQueryData(["diet"], freshData);
+    } catch (e) {
+      console.error("Failed to generate meal plan", e);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
   const prefer = (plan.data?.prefer as string[]) ?? [];
   const limit = (plan.data?.limit as string[]) ?? [];
   const sample = (plan.data?.sample_day as string[]) ?? [];
@@ -65,11 +147,11 @@ export function CarePlan() {
             glucose trend, Bayesian posterior, and Thompson recommendation learning.
           </p>
           <div className="care-plan-action-row">
-            <button type="button" className="generate-plan-button" onClick={() => plan.refetch()} disabled={plan.isFetching}>
-              <RefreshCw size={18} className={plan.isFetching ? "spin-icon" : undefined} />
-              {plan.isFetching ? "Generating" : "Generate meal plan"}
+            <button type="button" className="generate-plan-button" onClick={handleGenerate} disabled={isGenerating || plan.isFetching}>
+              <RefreshCw size={18} className={(isGenerating || plan.isFetching) ? "spin-icon" : undefined} />
+              {(isGenerating || plan.isFetching) ? "Generating" : "Generate meal plan"}
             </button>
-            <Badge tone={plan.data?.source === "gemini-personalized" ? "good" : "warning"}>{source}</Badge>
+            <Badge tone={plan.data?.source?.endsWith("-personalized") ? "good" : "warning"}>{source}</Badge>
             <small><Clock3 size={14} /> Updated {generatedAt}</small>
           </div>
         </div>
@@ -99,7 +181,7 @@ export function CarePlan() {
                       <span>{mealLabels[index] ?? `Meal ${index + 1}`}</span>
                       <ChefHat size={20} />
                     </div>
-                    <p>{item}</p>
+                    {renderMealText(item)}
                   </article>
                 ))}
               </div>

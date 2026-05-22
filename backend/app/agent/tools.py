@@ -19,8 +19,17 @@ def get_profile(db: Session, user_id: int) -> dict | None:
         "bmi": profile.bmi,
         "high_bp": profile.high_bp,
         "high_chol": profile.high_chol,
+        "smoker": profile.smoker,
         "phys_activity": profile.phys_activity,
+        "fruits": profile.fruits,
+        "veggies": profile.veggies,
         "general_health": profile.general_health,
+        "stroke_history": profile.stroke_history,
+        "heart_disease_history": profile.heart_disease_history,
+        "difficulty_walking": profile.difficulty_walking,
+        "family_history_diabetes": profile.family_history_diabetes,
+        "fasting_glucose_optional": profile.fasting_glucose_optional,
+        "hba1c_optional": profile.hba1c_optional,
     }
 
 
@@ -34,9 +43,17 @@ def get_logs(db: Session, user_id: int, days: int = 7) -> list[dict]:
             "is_fasting": row.is_fasting,
             "fasting_glucose": row.fasting_glucose,
             "post_meal_glucose": row.post_meal_glucose,
+            "hba1c_optional": row.hba1c_optional,
+            "weight_kg": row.weight_kg,
+            "bmi_optional": row.bmi_optional,
+            "systolic_bp": row.systolic_bp,
+            "diastolic_bp": row.diastolic_bp,
+            "activity_minutes": row.activity_minutes,
+            "notes": row.notes,
         }
         for row in rows
     ]
+
 
 
 def run_risk_check(db: Session, user_id: int) -> dict:
