@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { ArrowUp, ClipboardList, Database, History, RotateCcw, ShieldCheck, Sparkles } from "lucide-react";
+import { ArrowUp, Database, History, RotateCcw, Sparkles } from "lucide-react";
 import type { ReactNode } from "react";
 import { useMemo, useState, useRef, useEffect } from "react";
 import { api, type AgentChatResponse } from "../api/client";
@@ -70,9 +70,93 @@ function FormattedResponse({ content }: { content: string }) {
   return <div className="formatted-response">{blocks}</div>;
 }
 
+type TranslationFn = (key: string) => string;
+
+const VALUE_KEYS: Record<string, string> = {
+  balanced: "agent.value.tone.balanced",
+  concise: "agent.value.tone.concise",
+  detailed: "agent.value.tone.detailed",
+  "family-friendly": "agent.value.tone.familyFriendly",
+  nutrition: "agent.value.action.nutrition",
+  activity: "agent.value.action.activity",
+  monitoring: "agent.value.action.monitoring",
+  medication_check: "agent.value.action.medicationCheck",
+  clinician_questions: "agent.value.action.clinicianQuestions",
+  fasting_routine: "agent.value.action.fastingRoutine",
+  post_meal_review: "agent.value.action.postMealReview",
+  sleep_stress: "agent.value.action.sleepStress",
+  family_support: "agent.value.action.familySupport",
+  "no-data": "agent.value.pattern.noData",
+  "needs-attention": "agent.value.pattern.needsAttention",
+  watch: "agent.value.trend.watch",
+  steady: "agent.value.pattern.steady",
+  stable: "agent.value.trend.stable",
+  concerning: "agent.value.trend.concerning",
+  high: "agent.value.risk.high",
+  medium: "agent.value.risk.medium",
+  low: "agent.value.risk.low",
+  unknown: "common.unknown",
+  new: "agent.value.new",
+};
+
+const RECOMMENDATION_TITLE_KEYS: Record<string, string> = {
+  "Pair carbohydrates with protein or fiber": "agent.recommendation.nutrition",
+  "Walk after the largest meal": "agent.recommendation.activity",
+  "Keep glucose logging consistent": "agent.recommendation.monitoring",
+  "Prepare medication questions": "agent.recommendation.medicationCheck",
+  "Write down doctor questions": "agent.recommendation.clinicianQuestions",
+  "Standardize fasting checks": "agent.recommendation.fastingRoutine",
+  "Review post-meal patterns": "agent.recommendation.postMealReview",
+  "Note sleep and stress context": "agent.recommendation.sleepStress",
+  "Ask family for one practical support": "agent.recommendation.familySupport",
+  "Keep weekly glucose logging and prepare doctor questions.": "agent.confirmedAction.weeklyLogging",
+};
+
+const FEEDBACK_TONE_OPTIONS = [
+  { value: "concise", labelKey: "agent.concise" },
+  { value: "detailed", labelKey: "agent.detailed" },
+  { value: "family-friendly", labelKey: "agent.familyFriendly" },
+];
+
+function fallbackLabel(value: string) {
+  return value
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function translateValue(value: string | undefined | null, t: TranslationFn) {
+  if (!value) return "-";
+  const key = VALUE_KEYS[value];
+  return key ? t(key) : fallbackLabel(value);
+}
+
+function translateRecommendationTitle(value: string | undefined | null, t: TranslationFn) {
+  if (!value) return "";
+  const key = RECOMMENDATION_TITLE_KEYS[value];
+  return key ? t(key) : value;
+}
+
+function translateAdaptationNote(note: string | undefined, t: TranslationFn) {
+  if (!note) return "";
+  if (note === "No feedback yet. The agent is adapting from recent glucose patterns and general clinical guidance.") {
+    return t("agent.adaptation.noFeedback");
+  }
+
+  const match = note.match(
+    /^Personalized with (\d+) feedback signal\(s\): tone=([^,]+), focus=([^,]+), recent glucose pattern=([^.]+)\.$/,
+  );
+  if (!match) return note;
+
+  return t("agent.adaptation.personalized")
+    .replace("%d", match[1])
+    .replace("%tone", translateValue(match[2], t))
+    .replace("%focus", translateValue(match[3], t))
+    .replace("%pattern", translateValue(match[4], t));
+}
+
 export function Agent() {
   const auth = useAuth();
-  const { t, language } = useI18n();
+  const { t } = useI18n();
   const userId = auth.session?.userId ?? 1;
   const chatSession = useAgentChatSession();
   const [feedbackTone, setFeedbackTone] = useState("concise");
@@ -81,7 +165,6 @@ export function Agent() {
   const risk = useQuery({ queryKey: ["risk", userId], queryFn: () => api.latestRisk(userId) });
   const monitoring = useQuery({ queryKey: ["monitoring", userId], queryFn: () => api.latestMonitoring(userId) });
   const logs = useQuery({ queryKey: ["logs", userId], queryFn: () => api.logs(userId) });
-  const alerts = useQuery({ queryKey: ["alerts", userId], queryFn: () => api.alerts(userId) });
   const latestResponse = useMemo(() => [...chatSession.messages].reverse().find((item) => item.response)?.response, [chatSession.messages]);
   const chatHistory = useMemo(() => chatSession.messages.filter((message) => message.role === "user"), [chatSession.messages]);
   const quickPrompts = useMemo(() => [
@@ -102,15 +185,16 @@ export function Agent() {
     },
   });
   const feedback = useMutation({
-    mutationFn: (helpful: boolean) => api.agentFeedback({
+    mutationFn: (tone: string) => api.agentFeedback({
       user_id: userId,
       message: latestResponse?.answer ?? "No answer selected",
-      helpful,
-      preferred_tone: feedbackTone,
-      confirmed_action: helpful ? "Keep weekly glucose logging and prepare doctor questions." : undefined,
-      notes: helpful ? "User confirmed this answer style was useful." : "User wants a different style next time.",
+      helpful: true,
+      preferred_tone: tone,
+      confirmed_action: "Keep weekly glucose logging and prepare doctor questions.",
+      notes: "User selected this preferred answer tone.",
     }),
-    onSuccess: () => {
+    onSuccess: (_response, tone) => {
+      setFeedbackTone(tone);
       appendAgentAssistantMessage(t("agent.feedbackSaved"));
     },
   });
@@ -141,7 +225,7 @@ export function Agent() {
   };
   return (
     <div className="page agent-page frosty-agent-page">
-      <PageHeader title={t("agent.title")} subtitle={t("agent.subtitle")} meta={`Mode: ${llmLabel}`} />
+      <PageHeader title={t("agent.title")} subtitle={t("agent.subtitle")} meta={`${t("agent.mode")}: ${llmLabel}`} />
       <div className="agent-layout">
         <Card title={t("agent.card")} action={<div className="agent-card-actions"><button type="button" className="secondary history-toggle" onClick={() => setHistoryOpen((value) => !value)}><History size={15} /> {t("agent.history")}</button><Badge>{llmLabel}</Badge></div>}>
           <div className="agent-ambient-mark" aria-hidden="true">
@@ -189,13 +273,23 @@ export function Agent() {
                 <strong>{t("agent.teach")}</strong>
                 <p>{t("agent.teachBody")}</p>
               </div>
-              <select value={feedbackTone} onChange={(event) => setFeedbackTone(event.target.value)} aria-label={t("agent.aria.preferredTone")}>
-                <option value="concise">{t("agent.concise")}</option>
-                <option value="detailed">{t("agent.detailed")}</option>
-                <option value="family-friendly">{t("agent.familyFriendly")}</option>
-              </select>
-              <button className="secondary" type="button" disabled={feedback.isPending} onClick={() => feedback.mutate(true)}>{t("agent.useful")}</button>
-              <button className="secondary" type="button" disabled={feedback.isPending} onClick={() => feedback.mutate(false)}>{t("agent.needsWork")}</button>
+              <div className="tone-choice-row" role="group" aria-label={t("agent.aria.preferredTone")}>
+                {FEEDBACK_TONE_OPTIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    className={`tone-choice${feedbackTone === option.value ? " selected" : ""}`}
+                    type="button"
+                    disabled={feedback.isPending}
+                    aria-pressed={feedbackTone === option.value}
+                    onClick={() => {
+                      setFeedbackTone(option.value);
+                      feedback.mutate(option.value);
+                    }}
+                  >
+                    {t(option.labelKey)}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
         </Card>
@@ -203,35 +297,22 @@ export function Agent() {
           <Card title={t("agent.memory")} action={<Badge>{learning?.feedback_count ?? 0} {t("agent.signals")}</Badge>}>
             {learning ? (
               <div className="memory-stack">
-                <div><span>{t("agent.preferredTone")}</span><strong>{learning.preferred_tone}</strong></div>
-                <div><span>{t("agent.learnedFocus")}</span><strong>{learning.preferred_action_type ?? "monitoring"}</strong></div>
-                <div><span>{t("agent.glucosePattern")}</span><strong>{learning.recent_glucose_pattern?.label ?? "new"}</strong></div>
-                <div><span>{t("agent.helpfulness")}</span><strong>{learning.helpful_rate === null ? "new" : `${Math.round(learning.helpful_rate * 100)}%`}</strong></div>
-                <p>{learning.adaptation_note}</p>
-                {learning.next_best_action && <small>{t("agent.next")}: {learning.next_best_action.title}</small>}
-                {learning.confirmed_actions.length > 0 && <small>{t("agent.remembered")}: {learning.confirmed_actions[0]}</small>}
+                <div><span>{t("agent.preferredTone")}</span><strong>{translateValue(learning.preferred_tone, t)}</strong></div>
+                <div><span>{t("agent.learnedFocus")}</span><strong>{translateValue(learning.preferred_action_type ?? "monitoring", t)}</strong></div>
+                <div><span>{t("agent.glucosePattern")}</span><strong>{translateValue(learning.recent_glucose_pattern?.label ?? "new", t)}</strong></div>
+                <div><span>{t("agent.helpfulness")}</span><strong>{learning.helpful_rate === null ? t("agent.value.new") : `${Math.round(learning.helpful_rate * 100)}%`}</strong></div>
+                <p>{translateAdaptationNote(learning.adaptation_note, t)}</p>
+                {learning.next_best_action && <small>{t("agent.next")}: {translateRecommendationTitle(learning.next_best_action.title, t)}</small>}
+                {learning.confirmed_actions.length > 0 && <small>{t("agent.remembered")}: {translateRecommendationTitle(learning.confirmed_actions[0], t)}</small>}
               </div>
             ) : <EmptyState title={t("agent.noMemory")} body={t("agent.noMemoryBody")} />}
           </Card>
           <Card title={t("agent.usedData")} action={<Database size={18} />}>
             <div className="data-stack">
-              <div><span>{t("agent.riskModel")}</span><strong>{risk.data?.risk_level ?? "-"}</strong><small>{risk.data?.model_version ?? t("common.loading")}</small></div>
-              <div><span>{t("agent.trendModel")}</span><strong>{monitoring.data?.trend_label ?? "-"}</strong><small>{monitoring.data?.model_version ?? t("common.loading")}</small></div>
+              <div><span>{t("agent.riskModel")}</span><strong>{translateValue(risk.data?.risk_level, t)}</strong><small>{risk.data?.model_version ?? t("common.loading")}</small></div>
+              <div><span>{t("agent.trendModel")}</span><strong>{translateValue(monitoring.data?.trend_label, t)}</strong><small>{monitoring.data?.model_version ?? t("common.loading")}</small></div>
               <div><span>{t("agent.recentLogs")}</span><strong>{logs.data?.length ?? "-"}</strong><small>{t("agent.patientReadings")}</small></div>
             </div>
-          </Card>
-          <Card title={t("agent.guidance")} action={<ClipboardList size={18} />}>
-            {latestResponse?.guideline_snippets.length ? (
-              <div className="guideline-list">
-                {latestResponse.guideline_snippets.map((snippet) => <div key={snippet.id}><strong>{snippet.category}</strong><p>{snippet.text}</p></div>)}
-              </div>
-            ) : <EmptyState title={t("agent.noSnippets")} body={t("agent.noSnippetsBody")} />}
-          </Card>
-          <Card title={t("agent.safety")} action={<ShieldCheck size={18} />}>
-            <p>{latestResponse?.safety_note ?? t("agent.defaultSafety")}</p>
-          </Card>
-          <Card title={t("agent.proactive")}>
-            {(alerts.data ?? []).length ? <div className="alert-list">{alerts.data?.slice(0, 3).map((alert) => <div key={alert.id} className={alert.severity === "danger" ? "danger" : "warning"}><strong>{alert.title}</strong><span>{alert.message}</span></div>)}</div> : <EmptyState title={t("agent.noActiveAlerts")} body={t("agent.noActiveAlertsBody")} />}
           </Card>
         </div>
       </div>

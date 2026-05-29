@@ -15,17 +15,18 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 from sqlalchemy.orm import Session
 
 from app.db import models
+from app.reports.generator import build_report
 
 
 # Generates a styled clinician-facing PDF from a stored Glyco report and the
 # latest live model state.
-def _palette(report_type: str) -> dict:
+def _palette(report_type: str, language: str = "en") -> dict:
     if report_type == "doctor":
         return {
             "primary": "#1d4ed8",
             "accent": "#1e3a5f",
             "tag": "CLINICAL",
-            "subtitle": "Clinical Summary Report",
+            "subtitle": "Klinicki sazetak" if language == "bs" else "Clinical Summary Report",
             "header_bg": "#1d4ed8",
             "header_text": colors.white,
             "tag_bg": "#2563eb",
@@ -36,7 +37,7 @@ def _palette(report_type: str) -> dict:
             "primary": "#be185d",
             "accent": "#831843",
             "tag": "FAMILY",
-            "subtitle": "Family Update",
+            "subtitle": "Porodicni sazetak" if language == "bs" else "Family Update",
             "header_bg": "#fce7f3",
             "header_text": colors.HexColor("#9d174d"),
             "tag_bg": "#fce7f3",
@@ -46,7 +47,7 @@ def _palette(report_type: str) -> dict:
         "primary": "#154539",
         "accent": "#154539",
         "tag": "WEEKLY",
-        "subtitle": "Weekly Reflection",
+        "subtitle": "Sedmicni pregled" if language == "bs" else "Weekly Reflection",
         "header_bg": "#d1e8da",
         "header_text": colors.HexColor("#154539"),
         "tag_bg": "#d1e8da",
@@ -58,8 +59,8 @@ def _avg(values: list[float]) -> float | None:
     return round(mean(values), 1) if values else None
 
 
-def _build_metrics_table(metrics: list[list[str]], palette: dict) -> Table:
-    rows = [["Metric", "Value"], *metrics]
+def _build_metrics_table(metrics: list[list[str]], palette: dict, language: str = "en") -> Table:
+    rows = [["Metrika", "Vrijednost"] if language == "bs" else ["Metric", "Value"], *metrics]
     table = Table(rows, colWidths=[200, 280])
     table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(palette["primary"])),
@@ -71,10 +72,10 @@ def _build_metrics_table(metrics: list[list[str]], palette: dict) -> Table:
     return table
 
 
-def _build_log_table(recent_logs, palette: dict) -> Table | None:
+def _build_log_table(recent_logs, palette: dict, language: str = "en") -> Table | None:
     if not recent_logs:
         return None
-    rows = [["Date", "Fasting", "Post-meal", "Activity", "BP"]]
+    rows = [["Datum", "Nataste", "Nakon obroka", "Aktivnost", "Pritisak"]] if language == "bs" else [["Date", "Fasting", "Post-meal", "Activity", "BP"]]
     for log in recent_logs:
         bp = "-"
         if log.systolic_bp and log.diastolic_bp:
@@ -148,7 +149,7 @@ def _build_bar_chart(values: list[float], labels: list[str], palette: dict, titl
     return drawing
 
 
-def generate_pdf_report(db: Session, report_id: int) -> Path:
+def generate_pdf_report(db: Session, report_id: int, language: str | None = None) -> Path:
     """Produce a styled PDF for a report and return its filesystem path."""
     report = db.get(models.Report, report_id)
     if not report:
@@ -163,13 +164,20 @@ def generate_pdf_report(db: Session, report_id: int) -> Path:
     avg_fasting = _avg(fasting_values)
     avg_post = _avg(post_values)
     avg_activity = _avg(activity_values)
+    requested_language = "bs" if language == "bs" else "en" if language == "en" else None
     content = report.content_json or {}
+    content_language = content.get("language")
+    if requested_language and requested_language != content_language:
+        risk = db.query(models.RiskAssessment).filter(models.RiskAssessment.user_id == report.user_id).order_by(models.RiskAssessment.created_at.desc()).first()
+        monitoring = db.query(models.MonitoringAssessment).filter(models.MonitoringAssessment.user_id == report.user_id).order_by(models.MonitoringAssessment.created_at.desc()).first()
+        content = build_report(report.report_type, user, risk, monitoring, logs, requested_language)
+    report_language = content.get("language", "en")
     sections = content.get("sections", [])
-    palette = _palette(report.report_type)
+    palette = _palette(report.report_type, report_language)
 
     output_dir = Path(gettempdir()) / "glyco_reports"
     output_dir.mkdir(parents=True, exist_ok=True)
-    path = output_dir / f"glyco_report_{report_id}.pdf"
+    path = output_dir / f"glyco_report_{report_id}_{report_language}.pdf"
 
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle(
@@ -238,7 +246,8 @@ def generate_pdf_report(db: Session, report_id: int) -> Path:
     story.extend([header, Spacer(1, 16)])
 
     if user:
-        story.append(Paragraph(f"Patient: {user.full_name}", meta_style))
+        patient_label = "Pacijent" if report_language == "bs" else "Patient"
+        story.append(Paragraph(f"{patient_label}: {user.full_name}", meta_style))
         story.append(Spacer(1, 6))
 
     story.append(Paragraph(content.get("title", "Glyco Report"), title_style))
@@ -251,39 +260,39 @@ def generate_pdf_report(db: Session, report_id: int) -> Path:
 
     if report.report_type == "doctor":
         metrics = [
-            ["Avg fasting", f"{avg_fasting} mg/dL" if avg_fasting is not None else "n/a"],
-            ["Avg post-meal", f"{avg_post} mg/dL" if avg_post is not None else "n/a"],
-            ["Avg activity", f"{avg_activity} min/day" if avg_activity is not None else "n/a"],
-            ["Latest BP", f"{latest_log.systolic_bp}/{latest_log.diastolic_bp} mmHg" if latest_log and latest_log.systolic_bp and latest_log.diastolic_bp else "n/a"],
+            ["Prosjek nataste" if report_language == "bs" else "Avg fasting", f"{avg_fasting} mg/dL" if avg_fasting is not None else ("n/d" if report_language == "bs" else "n/a")],
+            ["Prosjek nakon obroka" if report_language == "bs" else "Avg post-meal", f"{avg_post} mg/dL" if avg_post is not None else ("n/d" if report_language == "bs" else "n/a")],
+            ["Prosjek aktivnosti" if report_language == "bs" else "Avg activity", f"{avg_activity} {'min/dan' if report_language == 'bs' else 'min/day'}" if avg_activity is not None else ("n/d" if report_language == "bs" else "n/a")],
+            ["Zadnji pritisak" if report_language == "bs" else "Latest BP", f"{latest_log.systolic_bp}/{latest_log.diastolic_bp} mmHg" if latest_log and latest_log.systolic_bp and latest_log.diastolic_bp else ("n/d" if report_language == "bs" else "n/a")],
         ]
-        story.extend([Spacer(1, 12), Paragraph("SUMMARY METRICS", section_title_style), _build_metrics_table(metrics, palette)])
-        log_table = _build_log_table(recent_logs, palette)
+        story.extend([Spacer(1, 12), Paragraph("SAZETAK METRIKA" if report_language == "bs" else "SUMMARY METRICS", section_title_style), _build_metrics_table(metrics, palette, report_language)])
+        log_table = _build_log_table(recent_logs, palette, report_language)
         if log_table:
-            story.extend([Spacer(1, 12), Paragraph("RECENT LOGS", section_title_style), log_table])
-        chart = _build_line_chart(fasting_values, palette, "Fasting Glucose Trend (last 7)")
+            story.extend([Spacer(1, 12), Paragraph("NEDAVNI ZAPISI" if report_language == "bs" else "RECENT LOGS", section_title_style), log_table])
+        chart = _build_line_chart(fasting_values, palette, "Trend glukoze nataste (zadnjih 7)" if report_language == "bs" else "Fasting Glucose Trend (last 7)")
         if chart:
             story.extend([Spacer(1, 12), chart])
     elif report.report_type == "family":
         metrics = [
-            ["Avg fasting", f"{avg_fasting} mg/dL" if avg_fasting is not None else "n/a"],
-            ["Latest reading", f"{latest_log.glucose_level} mg/dL" if latest_log and latest_log.glucose_level is not None else "n/a"],
-            ["Avg activity", f"{avg_activity} min/day" if avg_activity is not None else "n/a"],
+            ["Prosjek nataste" if report_language == "bs" else "Avg fasting", f"{avg_fasting} mg/dL" if avg_fasting is not None else ("n/d" if report_language == "bs" else "n/a")],
+            ["Zadnje ocitanje" if report_language == "bs" else "Latest reading", f"{latest_log.glucose_level} mg/dL" if latest_log and latest_log.glucose_level is not None else ("n/d" if report_language == "bs" else "n/a")],
+            ["Prosjek aktivnosti" if report_language == "bs" else "Avg activity", f"{avg_activity} {'min/dan' if report_language == 'bs' else 'min/day'}" if avg_activity is not None else ("n/d" if report_language == "bs" else "n/a")],
         ]
-        story.extend([Spacer(1, 12), Paragraph("KEY NUMBERS", section_title_style), _build_metrics_table(metrics, palette)])
-        chart = _build_line_chart(fasting_values, palette, "Fasting Glucose Snapshot")
+        story.extend([Spacer(1, 12), Paragraph("KLJUCNI BROJEVI" if report_language == "bs" else "KEY NUMBERS", section_title_style), _build_metrics_table(metrics, palette, report_language)])
+        chart = _build_line_chart(fasting_values, palette, "Pregled glukoze nataste" if report_language == "bs" else "Fasting Glucose Snapshot")
         if chart:
             story.extend([Spacer(1, 12), chart])
     else:
         metrics = [
-            ["Avg fasting", f"{avg_fasting} mg/dL" if avg_fasting is not None else "n/a"],
-            ["Avg post-meal", f"{avg_post} mg/dL" if avg_post is not None else "n/a"],
-            ["Avg activity", f"{avg_activity} min/day" if avg_activity is not None else "n/a"],
+            ["Prosjek nataste" if report_language == "bs" else "Avg fasting", f"{avg_fasting} mg/dL" if avg_fasting is not None else ("n/d" if report_language == "bs" else "n/a")],
+            ["Prosjek nakon obroka" if report_language == "bs" else "Avg post-meal", f"{avg_post} mg/dL" if avg_post is not None else ("n/d" if report_language == "bs" else "n/a")],
+            ["Prosjek aktivnosti" if report_language == "bs" else "Avg activity", f"{avg_activity} {'min/dan' if report_language == 'bs' else 'min/day'}" if avg_activity is not None else ("n/d" if report_language == "bs" else "n/a")],
         ]
-        story.extend([Spacer(1, 12), Paragraph("WEEKLY METRICS", section_title_style), _build_metrics_table(metrics, palette)])
-        chart = _build_line_chart(fasting_values, palette, "Fasting Trend (last 7)")
+        story.extend([Spacer(1, 12), Paragraph("SEDMICNE METRIKE" if report_language == "bs" else "WEEKLY METRICS", section_title_style), _build_metrics_table(metrics, palette, report_language)])
+        chart = _build_line_chart(fasting_values, palette, "Trend nataste (zadnjih 7)" if report_language == "bs" else "Fasting Trend (last 7)")
         if chart:
             story.extend([Spacer(1, 12), chart])
-        activity_chart = _build_bar_chart(activity_values, [log.log_date.strftime("%m/%d") for log in recent_logs], palette, "Activity Minutes")
+        activity_chart = _build_bar_chart(activity_values, [log.log_date.strftime("%m/%d") for log in recent_logs], palette, "Minute aktivnosti" if report_language == "bs" else "Activity Minutes")
         if activity_chart:
             story.extend([Spacer(1, 12), activity_chart])
 

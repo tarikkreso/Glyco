@@ -40,6 +40,30 @@ button, input, select, textarea { font: inherit; }
 .sidebar a { color: var(--text); text-decoration: none; display: flex; gap: 14px; align-items: center; padding: 13px 18px; border-radius: 14px; border: 1px solid transparent; white-space: nowrap; overflow: hidden; }
 .sidebar a.active { background: rgba(247, 252, 245, .76); color: var(--primary); border-color: rgba(222, 243, 226, .72); box-shadow: inset 0 1px 0 rgba(255,255,255,.7), 0 12px 30px rgba(31, 54, 39, .08); font-weight: 700; }
 .sidebar-footer { margin-top: auto; display: grid; gap: 22px; color: var(--muted); padding: 0 18px; }
+.sidebar-logout-button {
+  width: 100%;
+  padding: 12px 18px;
+  border-radius: 12px;
+  border: 1px solid rgba(91, 115, 101, 0.16);
+  background: rgba(255, 255, 255, 0.58);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.68);
+  transition: all 150ms ease-in-out;
+  text-align: center;
+}
+.sidebar-logout-button:hover {
+  background: var(--error-bg);
+  border-color: rgba(186, 26, 26, 0.28);
+  color: var(--error);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(186, 26, 26, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+.sidebar-logout-button:active {
+  transform: translateY(0);
+}
 .sidebar-collapse-button { width: 40px; height: 40px; border: 1px solid rgba(91, 115, 101, .24); border-radius: 10px; background: rgba(255,255,255,.58); color: var(--primary); display: grid; place-items: center; cursor: pointer; box-shadow: inset 0 1px 0 rgba(255,255,255,.7); }
 .sidebar-collapsed .sidebar { padding-inline: 14px; align-items: center; }
 .sidebar-collapsed .brand-mark { justify-content: center; }
@@ -69,6 +93,11 @@ main { min-width: 0; }
 .page-header h1 { font-size: 30px; line-height: 38px; }
 .page-header p { margin: 4px 0 0; }
 .meta { font-size: 13px; color: var(--muted); white-space: nowrap; }
+.page-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
 .stats-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 24px; }
 .stat-card, .card {
   background:
@@ -214,9 +243,27 @@ input, select, textarea { width: 100%; border: 1px solid rgba(91, 115, 101, .18)
 textarea { resize: vertical; }
 .check { display: flex; align-items: center; gap: 8px; text-transform: none; letter-spacing: 0; font-size: 13px; font-weight: 500; color: var(--text); }
 .check input { width: 16px; height: 16px; accent-color: var(--primary); }
-.primary, .secondary { border-radius: 6px; padding: 11px 16px; cursor: pointer; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; font-weight: 800; }
+.primary, .secondary { border-radius: 6px; padding: 11px 16px; cursor: pointer; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; font-weight: 800; transition: all 150ms ease-in-out; }
 .primary { border: 1px solid var(--primary); background: var(--primary); color: #fff; }
+.primary:hover {
+  background: #0b7858;
+  border-color: #0b7858;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(21, 69, 57, 0.15);
+}
+.primary:active {
+  transform: translateY(0);
+}
 .secondary { border: 1px solid rgba(91, 115, 101, .18); background: rgba(255,255,255,.58); color: var(--primary); box-shadow: inset 0 1px 0 rgba(255,255,255,.68); }
+.secondary:hover {
+  background: var(--primary-soft);
+  border-color: var(--primary);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(21, 69, 57, 0.08), inset 0 1px 0 rgba(255,255,255,.8);
+}
+.secondary:active {
+  transform: translateY(0);
+}
 .button-link { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; text-align: center; }
 .probability { background: var(--error-bg); border-radius: 10px; border: 1px solid #f4b4ae; padding: 22px; text-align: center; margin-bottom: 14px; }
 .probability strong { font: 700 52px/1 Manrope; color: var(--error); display: block; }
@@ -2644,6 +2691,7 @@ button.metric-card {
   .page { padding: 12px 12px 86px; }
   .page-header { display: block; margin-bottom: 18px; }
   .page-header h1 { font-size: 20px; line-height: 28px; }
+  .page-header-actions { margin-top: 10px; flex-wrap: wrap; }
   .stats-grid, .dashboard-grid, .risk-layout, .family-grid, .report-grid, .agent-layout { grid-template-columns: 1fr; gap: 12px; }
   .metric-detail-grid, .model-flow-grid, .monitoring-main-grid, .monitoring-hero-panel { grid-template-columns: 1fr; gap: 12px; }
   .care-plan-hero, .care-plan-grid, .meal-plan-grid, .weekly-action-grid { grid-template-columns: 1fr; gap: 12px; }

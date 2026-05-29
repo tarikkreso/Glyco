@@ -29,7 +29,9 @@ export function Layout() {
       <div className={`shell ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
         <aside className="sidebar">
           <div className="brand-mark">
-            <div className="seal"><BarChart3 size={18} /></div>
+            <div className="seal">
+              <img src="/logo.png" alt="Glyco Logo" style={{ width: "24px", height: "24px", objectFit: "contain" }} />
+            </div>
             <div>
               <strong>Glyco</strong>
               <span>{t("app.clinicalCenter")}</span>
@@ -51,10 +53,9 @@ export function Layout() {
             })}
           </nav>
           <div className="sidebar-footer">
-            <span>{t("app.helpCenter")}</span>
             <button
               type="button"
-              className="link-button"
+              className="sidebar-logout-button"
               onClick={() => {
                 auth.logout();
                 navigate("/login", { replace: true });

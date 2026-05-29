@@ -419,7 +419,7 @@ def forecast_accuracy(user_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/reports/{report_type}", response_model=ReportOut)
-def create_report(report_type: str, user_id: int = 1, db: Session = Depends(get_db)):
+def create_report(report_type: str, user_id: int = 1, language: str = "en", db: Session = Depends(get_db)):
     """Create and persist a JSON report."""
     if report_type not in {"doctor", "family", "weekly"}:
         raise HTTPException(400, "Unsupported report type")
@@ -429,7 +429,7 @@ def create_report(report_type: str, user_id: int = 1, db: Session = Depends(get_
     risk = db.query(models.RiskAssessment).filter(models.RiskAssessment.user_id == user_id).order_by(models.RiskAssessment.created_at.desc()).first()
     monitoring = db.query(models.MonitoringAssessment).filter(models.MonitoringAssessment.user_id == user_id).order_by(models.MonitoringAssessment.created_at.desc()).first()
     logs = db.query(models.HealthLog).filter(models.HealthLog.user_id == user_id).order_by(models.HealthLog.created_at.asc(), models.HealthLog.log_date.asc()).all()
-    content = build_report(report_type, user, risk, monitoring, logs)
+    content = build_report(report_type, user, risk, monitoring, logs, "bs" if language == "bs" else "en")
     row = models.Report(user_id=user_id, report_type=report_type, content_json=content)
     db.add(row)
     db.commit()
@@ -445,10 +445,10 @@ def get_reports(user_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/reports/{report_id}/pdf")
-def report_pdf(report_id: int, inline: bool = False, db: Session = Depends(get_db)):
+def report_pdf(report_id: int, inline: bool = False, language: str | None = None, db: Session = Depends(get_db)):
     """Generate and return a PDF export for a report."""
     try:
-        path = generate_pdf_report(db, report_id)
+        path = generate_pdf_report(db, report_id, language)
     except ValueError:
         raise HTTPException(404, "Report not found")
     disposition = "inline" if inline else "attachment"

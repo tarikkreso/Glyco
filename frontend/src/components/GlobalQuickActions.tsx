@@ -7,6 +7,8 @@ import { Card, EmptyState, LoadingState, useToast } from "./ui";
 import { LogNewDataForm } from "./LogNewDataForm";
 import { useI18n } from "../i18n";
 
+type TranslationFn = (key: string) => string;
+
 type SwipeGestureState = {
   alertId: number;
   pointerId: number;
@@ -14,6 +16,68 @@ type SwipeGestureState = {
   startY: number;
   engaged: boolean;
 };
+
+const ALERT_TEXT_KEYS: Record<string, string> = {
+  "Forecast glucose alert": "alerts.text.title.forecastGlucose",
+  "Sustained elevated fasting glucose": "alerts.text.title.sustainedFasting",
+  "Concerning trend detected": "alerts.text.title.concerningTrend",
+  "Watch pattern detected": "alerts.text.title.watchPattern",
+  "Review recent logs and generate a doctor summary if elevated readings continue.": "alerts.text.action.reviewLogs",
+  "Review the generated doctor report and contact your clinician if this pattern persists.": "alerts.text.action.reviewDoctorReport",
+  "Glucose is predicted to approach the lower boundary in the next few hours. Consider a small snack and check again soon. Contact your doctor if you feel unwell.": "alerts.text.forecast.low",
+  "Glucose is trending upward and may exceed the upper boundary. Light activity (a 15-minute walk) often helps. Stay hydrated.": "alerts.text.forecast.highRising",
+  "A high glucose reading is predicted. Review recent meals and activity. Consult your care plan.": "alerts.text.forecast.high",
+  "Glucose is falling quickly. Keep a fast-acting carbohydrate nearby and monitor more frequently.": "alerts.text.forecast.falling",
+  "Glucose looks stable. Keep up your current routine.": "alerts.text.forecast.stable",
+  "Forecast generated. Continue monitoring as usual.": "alerts.text.forecast.default",
+  "Repeated elevated glucose readings": "alerts.anomaly.repeatedElevated",
+  "Rising glucose pattern": "alerts.anomaly.risingPattern",
+  "High glucose variability": "alerts.anomaly.highVariability",
+};
+
+function translatedTrendLabel(t: TranslationFn, value: string) {
+  const normalized = value.trim().toLowerCase();
+  const key = `alerts.trend.${normalized}`;
+  const translated = t(key);
+  return translated === key ? value : translated;
+}
+
+function translateAlertText(text: string | undefined, t: TranslationFn) {
+  if (!text) return "";
+  const exactKey = ALERT_TEXT_KEYS[text];
+  if (exactKey) return t(exactKey);
+
+  const monitoringMatch = text.match(/^Glyco detected a (watch|concerning) glucose monitoring state\.$/i);
+  if (monitoringMatch) {
+    return t("alerts.text.message.monitoringState").replace("%s", translatedTrendLabel(t, monitoringMatch[1]));
+  }
+
+  const sustainedMatch = text.match(
+    /^Glyco detected that the last 3 fasting glucose readings were above 7\.0 mmol\/L and generated a doctor report\. Forecast trend: ([^.]+)\.$/i,
+  );
+  if (sustainedMatch) {
+    return t("alerts.text.message.sustainedFasting").replace("%s", translatedTrendLabel(t, sustainedMatch[1]));
+  }
+
+  return text;
+}
+
+function translateAnomalyText(text: string | undefined, t: TranslationFn) {
+  if (!text) return "";
+  const exactKey = ALERT_TEXT_KEYS[text];
+  if (exactKey) return t(exactKey);
+
+  const repeatedMatch = text.match(/^(\d+) recent readings were above the fasting or post-meal threshold for their log type\.$/i);
+  if (repeatedMatch) return t("alerts.anomaly.detail.repeatedElevated").replace("%d", repeatedMatch[1]);
+
+  const risingMatch = text.match(/^Recent glucose is rising about ([\d.-]+) mg\/dL per log\.$/i);
+  if (risingMatch) return t("alerts.anomaly.detail.risingPattern").replace("%s", risingMatch[1]);
+
+  const variabilityMatch = text.match(/^Recent variability is ([\d.-]+) mg\/dL\.$/i);
+  if (variabilityMatch) return t("alerts.anomaly.detail.highVariability").replace("%s", variabilityMatch[1]);
+
+  return text;
+}
 
 export function GlobalQuickActions() {
   const [logOpen, setLogOpen] = useState(false);
@@ -23,8 +87,7 @@ export function GlobalQuickActions() {
   const userId = auth.session?.userId ?? 1;
   const queryClient = useQueryClient();
   const toast = useToast();
-  const { t, language } = useI18n();
-  const bs = language === "bs";
+  const { t } = useI18n();
 
   const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
 
@@ -63,13 +126,13 @@ export function GlobalQuickActions() {
     mutationFn: (alertId: number) => api.acknowledgeAlert(alertId, userId),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["alerts"] });
-      toast({ tone: "success", title: bs ? "Upozorenje zatvoreno" : t("log.alerts") });
+      toast({ tone: "success", title: t("alerts.toastDismissed") });
     },
     onError: (error) => {
       toast({
         tone: "error",
-        title: bs ? "Upozorenje nije moguće zatvoriti" : "Could not dismiss alert",
-        body: error instanceof Error ? error.message : (bs ? "Pokušajte ponovo." : "Please try again."),
+        title: t("alerts.toastDismissError"),
+        body: error instanceof Error ? error.message : t("alerts.toastTryAgain"),
       });
     },
   });
@@ -78,13 +141,13 @@ export function GlobalQuickActions() {
     mutationFn: (alertId: number) => api.deleteAlert(alertId, userId),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["alerts"] });
-      toast({ tone: "success", title: bs ? "Upozorenje obrisano" : "Alert deleted" });
+      toast({ tone: "success", title: t("alerts.toastDeleted") });
     },
     onError: (error) => {
       toast({
         tone: "error",
-        title: bs ? "Upozorenje nije moguće obrisati" : "Could not delete alert",
-        body: error instanceof Error ? error.message : (bs ? "Pokušajte ponovo." : "Please try again."),
+        title: t("alerts.toastDeleteError"),
+        body: error instanceof Error ? error.message : t("alerts.toastTryAgain"),
       });
     },
   });
@@ -220,7 +283,7 @@ export function GlobalQuickActions() {
                   type="button"
                   className="icon-button"
                   onClick={() => setAlertsOpen(false)}
-                  aria-label={bs ? "Zatvori upozorenja" : "Close alerts"}
+                  aria-label={t("alerts.close")}
                 >
                   <X size={18} aria-hidden="true" />
                 </button>
@@ -237,8 +300,8 @@ export function GlobalQuickActions() {
                     <div className="alert-list">
                       {monitoring.data.anomaly_flags.map((flag) => (
                         <div key={flag.label} className={flag.level}>
-                          <strong>{flag.label}</strong>
-                          <span>{flag.detail}</span>
+                          <strong>{translateAnomalyText(flag.label, t)}</strong>
+                          <span>{translateAnomalyText(flag.detail, t)}</span>
                         </div>
                       ))}
                     </div>
@@ -256,46 +319,52 @@ export function GlobalQuickActions() {
                     <LoadingState label={t("alerts.loadingProactive")} />
                   ) : activeAlerts.length ? (
                     <div className="alert-list">
-                      {activeAlerts.map((alert) => (
-                        <div
-                          key={alert.id}
-                          className={`${alert.severity === "danger" ? "danger" : "warning"} swipeable-alert${draggingAlertId === alert.id ? " dragging" : ""}`}
-                          style={
-                            swipeOffsets[alert.id]
-                              ? { transform: `translateX(${swipeOffsets[alert.id]}px)` }
-                              : undefined
-                          }
-                          onPointerDown={(event) => onAlertPointerDown(alert.id, event)}
-                          onPointerMove={(event) => onAlertPointerMove(alert.id, event)}
-                          onPointerUp={(event) => onAlertPointerEnd(alert.id, event)}
-                          onPointerCancel={(event) => onAlertPointerEnd(alert.id, event)}
-                        >
-                          <div className="alert-item-head">
-                            <strong>{alert.title}</strong>
-                            <div className="alert-item-actions">
-                              <button
-                                type="button"
-                                onClick={() => acknowledgeAlert.mutate(alert.id)}
-                                disabled={acknowledgeAlert.isPending || deleteAlert.isPending}
-                                aria-label={`${t("alerts.dismiss")}: ${alert.title}`}
-                              >
-                                {t("alerts.dismiss")}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => deleteAlert.mutate(alert.id)}
-                                disabled={acknowledgeAlert.isPending || deleteAlert.isPending}
-                                aria-label={`${t("alerts.delete")}: ${alert.title}`}
-                              >
-                                {t("alerts.delete")}
-                              </button>
+                      {activeAlerts.map((alert) => {
+                        const title = translateAlertText(alert.title, t);
+                        const message = translateAlertText(alert.message, t);
+                        const recommendedAction = translateAlertText(alert.recommended_action, t);
+
+                        return (
+                          <div
+                            key={alert.id}
+                            className={`${alert.severity === "danger" ? "danger" : "warning"} swipeable-alert${draggingAlertId === alert.id ? " dragging" : ""}`}
+                            style={
+                              swipeOffsets[alert.id]
+                                ? { transform: `translateX(${swipeOffsets[alert.id]}px)` }
+                                : undefined
+                            }
+                            onPointerDown={(event) => onAlertPointerDown(alert.id, event)}
+                            onPointerMove={(event) => onAlertPointerMove(alert.id, event)}
+                            onPointerUp={(event) => onAlertPointerEnd(alert.id, event)}
+                            onPointerCancel={(event) => onAlertPointerEnd(alert.id, event)}
+                          >
+                            <div className="alert-item-head">
+                              <strong>{title}</strong>
+                              <div className="alert-item-actions">
+                                <button
+                                  type="button"
+                                  onClick={() => acknowledgeAlert.mutate(alert.id)}
+                                  disabled={acknowledgeAlert.isPending || deleteAlert.isPending}
+                                  aria-label={`${t("alerts.dismiss")}: ${title}`}
+                                >
+                                  {t("alerts.dismiss")}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => deleteAlert.mutate(alert.id)}
+                                  disabled={acknowledgeAlert.isPending || deleteAlert.isPending}
+                                  aria-label={`${t("alerts.delete")}: ${title}`}
+                                >
+                                  {t("alerts.delete")}
+                                </button>
+                              </div>
                             </div>
+                            <span>
+                              {message}{recommendedAction ? ` ${recommendedAction}` : ""}
+                            </span>
                           </div>
-                          <span>
-                            {alert.message}{alert.recommended_action ? ` ${alert.recommended_action}` : ""}
-                          </span>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   ) : (
                     <EmptyState

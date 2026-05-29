@@ -9,8 +9,8 @@ import { useI18n } from "../i18n";
 const reportTypes = [
   {
     id: "doctor",
-    label: "Doctor Summary",
-    description: "Clinical review with glucose trends, risk indicators, and medication adherence for your care team.",
+    labelKey: "reports.type.doctor",
+    descriptionKey: "reports.type.doctorDescription",
     icon: (
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
@@ -19,8 +19,8 @@ const reportTypes = [
   },
   {
     id: "family",
-    label: "Family Update",
-    description: "Plain-language overview of your health status and recent activity, designed for family members.",
+    labelKey: "reports.type.family",
+    descriptionKey: "reports.type.familyDescription",
     icon: (
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
@@ -32,8 +32,8 @@ const reportTypes = [
   },
   {
     id: "weekly",
-    label: "Weekly Reflection",
-    description: "7-day summary of glucose patterns, meals, activity, and AI insights for personal review.",
+    labelKey: "reports.type.weekly",
+    descriptionKey: "reports.type.weeklyDescription",
     icon: (
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
@@ -44,6 +44,22 @@ const reportTypes = [
     ),
   },
 ];
+
+function reportTypeLabel(type: string, t: (key: string) => string) {
+  if (type === "doctor") return t("reports.type.doctor");
+  if (type === "family") return t("reports.type.family");
+  if (type === "weekly") return t("reports.type.weekly");
+  return type;
+}
+
+function reportTitle(report: ReportDocument, t: (key: string) => string) {
+  return reportTypeLabel(report.report_type, t) || report.content.title;
+}
+
+function archiveEmptyText(type: string, t: (key: string) => string) {
+  if (type === "all") return t("reports.archive.emptyAll");
+  return t("reports.archive.emptyType").replace("%s", reportTypeLabel(type, t).toLowerCase());
+}
 
 /* ─── Doctor PDF — crisp clinical blue ───────────────────────────── */
 function DoctorPdf({ report }: { report: ReportDocument }) {
@@ -194,7 +210,7 @@ function ReportPdfPreview({ report }: { report: ReportDocument }) {
 /* ─── Main page ───────────────────────────────────────────────────── */
 export function Reports() {
   const auth = useAuth();
-  const { language } = useI18n();
+  const { language, t } = useI18n();
   const bs = language === "bs";
   const userId = auth.session?.userId ?? 1;
   const queryClient = useQueryClient();
@@ -207,7 +223,7 @@ export function Reports() {
   });
 
   const create = useMutation({
-    mutationFn: (type: string) => api.report(type, userId),
+    mutationFn: (type: string) => api.report(type, userId, language),
     onSuccess: (newReport: ReportDocument) => {
       queryClient.invalidateQueries({ queryKey: ["reports", userId] });
       setPreviewReport(newReport);
@@ -255,8 +271,8 @@ export function Reports() {
                 >
                   <div className="gen-card-icon">{rt.icon}</div>
                   <div className="gen-card-body">
-                    <strong>{rt.label}</strong>
-                    <p>{rt.description}</p>
+                    <strong>{t(rt.labelKey)}</strong>
+                    <p>{t(rt.descriptionKey)}</p>
                   </div>
                   <div className="gen-card-action">
                     {isPending ? (
@@ -290,7 +306,7 @@ export function Reports() {
             {latestReport?.id && (
               <a
                 className="preview-download"
-                href={api.reportPdfUrl(latestReport.id!)}
+                href={api.reportPdfUrl(latestReport.id!, false, language)}
                 download
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -347,7 +363,7 @@ export function Reports() {
                 className={`archive-filter${activeArchiveType === f ? " active" : ""}`}
                 onClick={() => setActiveArchiveType(f)}
               >
-                {f === "all" ? (bs ? "Sve" : "All") : (bs ? (f === "doctor" ? "Doktor" : f === "family" ? "Porodični" : "Sedmični") : f[0].toUpperCase() + f.slice(1))}
+                {t(`reports.archive.filter${f[0].toUpperCase() + f.slice(1)}`)}
               </button>
             ))}
           </div>
@@ -356,7 +372,7 @@ export function Reports() {
             {reports.isLoading ? (
               <LoadingState label="Loading archive…" />
             ) : filteredArchive.length === 0 ? (
-              <div className="archive-empty">{bs ? `Još nema ${activeArchiveType === "all" ? "izvještaja" : activeArchiveType === "doctor" ? "doktor izvještaja" : activeArchiveType === "family" ? "porodičnih izvještaja" : "sedmičnih izvještaja"}.` : `No ${activeArchiveType === "all" ? "" : activeArchiveType + " "}reports yet.`}</div>
+              <div className="archive-empty">{activeArchiveType === "all" ? t("reports.archive.emptyAll") : archiveEmptyText(activeArchiveType, t)}</div>
             ) : (
               filteredArchive.map((report, index) => (
                 <button
@@ -366,7 +382,7 @@ export function Reports() {
                 >
                   <div className="archive-item-top">
                     <span className={`archive-type-dot dot-${report.report_type}`} />
-                    <span className="archive-item-type">{report.report_type}</span>
+                    <span className="archive-item-type">{reportTypeLabel(report.report_type, t)}</span>
                     {report.created_at && (
                       <span className="archive-item-date">
                         {new Date(report.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
@@ -377,7 +393,7 @@ export function Reports() {
                   {report.id && (
                     <a
                       className="archive-dl"
-                      href={api.reportPdfUrl(report.id!)}
+                      href={api.reportPdfUrl(report.id!, false, language)}
                       download
                       onClick={(e) => e.stopPropagation()}
                     >

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Activity, ClipboardList } from "lucide-react";
 import { Area, ComposedChart, Legend, Line, ReferenceArea, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
@@ -28,6 +28,55 @@ function titleCase(value?: string) {
   return value ? value[0].toUpperCase() + value.slice(1) : "";
 }
 
+function trendLabel(value: string | undefined, t: (key: string) => string) {
+  if (value === "rising") return t("monitoring.trend.rising");
+  if (value === "falling") return t("monitoring.trend.falling");
+  if (value === "stable") return t("monitoring.trend.stable");
+  if (value === "watch") return t("monitoring.trend.watch");
+  if (value === "concerning") return t("monitoring.trend.concerning");
+  return value ? titleCase(value) : "-";
+}
+
+function forecastQualityValue(value: string | null | undefined, t: (key: string) => string) {
+  if (value === "learning") return t("monitoring.learning");
+  if (value === "calibrated") return t("monitoring.personalized");
+  if (value === "personalization_off") return t("monitoring.personalizationOff");
+  if (value === "needs_more_data" || !value) return t("monitoring.needsMoreData");
+  return value.replace(/_/g, " ");
+}
+
+function translateForecastRecommendation(text: string | undefined, t: (key: string) => string) {
+  if (!text) return t("monitoring.defaultAction");
+  const keyByText: Record<string, string> = {
+    "Glucose is predicted to approach the lower boundary in the next few hours. Consider a small snack and check again soon. Contact your doctor if you feel unwell.": "monitoring.recommendation.low",
+    "Glucose is trending upward and may exceed the upper boundary. Light activity (a 15-minute walk) often helps. Stay hydrated.": "monitoring.recommendation.highRising",
+    "A high glucose reading is predicted. Review recent meals and activity. Consult your care plan.": "monitoring.recommendation.high",
+    "Glucose is falling quickly. Keep a fast-acting carbohydrate nearby and monitor more frequently.": "monitoring.recommendation.falling",
+    "Glucose looks stable. Keep up your current routine.": "monitoring.recommendation.stable",
+    "Forecast generated. Continue monitoring as usual.": "monitoring.recommendation.default",
+  };
+  return keyByText[text] ? t(keyByText[text]) : text;
+}
+
+function translateMonitoringSummary(text: unknown, t: (key: string) => string) {
+  if (typeof text !== "string") return t("monitoring.noForecastPrompt");
+  if (text === "More readings are needed.") return t("monitoring.moreReadingsNeeded");
+  const match = text.match(/^Recent monitoring state is ([^.]+)\./);
+  if (match) return t("monitoring.stateSummary").replace("%s", trendLabel(match[1], t));
+  return text;
+}
+
+function formatForecastTick(value: number, range: 8 | 24 | 48 | "all") {
+  const date = new Date(value);
+  if (range === 8 || range === 24) {
+    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }
+  if (range === 48) {
+    return date.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit" });
+  }
+  return date.toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
 function forecastHeadline(forecast: GlucoseForecast | null, monitoring: MonitoringAssessment | undefined, t: (key: string) => string) {
   if (forecast?.predicted_low_alert) return t("monitoring.forecastLow");
   if (forecast?.predicted_high_alert) return t("monitoring.forecastHigh");
@@ -41,10 +90,10 @@ function forecastHeadline(forecast: GlucoseForecast | null, monitoring: Monitori
 
 function forecastSummary(forecast: GlucoseForecast | null, monitoring: MonitoringAssessment | undefined, t: (key: string) => string) {
   if (forecast) {
-    if (forecast.predicted_low_alert || forecast.predicted_high_alert) return forecast.recommendation;
-    return `${t("monitoring.forecast")} ${forecast.trend_direction}: +60 min ${forecast.predictions["60"]} mmol/L. ${t("monitoring.forecastsEstimate")}`;
+    if (forecast.predicted_low_alert || forecast.predicted_high_alert) return translateForecastRecommendation(forecast.recommendation, t);
+    return `${t("monitoring.forecast")} ${trendLabel(forecast.trend_direction, t)}: +60 min ${forecast.predictions["60"]} mmol/L. ${t("monitoring.forecastsEstimate")}`;
   }
-  return String(monitoring?.summary.message ?? t("monitoring.noForecastPrompt"));
+  return translateMonitoringSummary(monitoring?.summary.message, t);
 }
 
 function nextCheckText(forecast: GlucoseForecast | null, t: (key: string) => string) {
@@ -56,7 +105,7 @@ function nextCheckText(forecast: GlucoseForecast | null, t: (key: string) => str
 
 function qualityLabel(forecast: GlucoseForecast | null, accuracy: ForecastAccuracy | undefined, t: (key: string) => string) {
   if (!forecast) return t("monitoring.needsMoreData");
-  if (forecast.personalization_enabled === false || accuracy?.personalization_enabled === false) return "Personalization off";
+  if (forecast.personalization_enabled === false || accuracy?.personalization_enabled === false) return t("monitoring.personalizationOff");
   if (forecast.calibration_applied) return t("monitoring.personalized");
   if ((accuracy?.total_evaluations ?? 0) > 0) return t("monitoring.learning");
   return t("monitoring.needsMoreData");
@@ -78,7 +127,7 @@ function ForecastTooltip({ active, label, payload }: { active?: boolean; label?:
       <strong>{label ? new Date(Number(label)).toLocaleString() : t("monitoring.recent")}</strong>
       {point.actual != null && <span>{t("monitoring.actual")}: {point.actual} mmol/L ({point.is_fasting ? t("log.fasting") : t("log.notFasting")})</span>}
       {point.forecast != null && <span>{t("monitoring.forecast")}: {point.forecast} mmol/L</span>}
-      {point.forecastBand && <span>Confidence: {point.forecastBand[0]}-{point.forecastBand[1]} mmol/L</span>}
+      {point.forecastBand && <span>{t("monitoring.confidence")}: {point.forecastBand[0]}-{point.forecastBand[1]} mmol/L</span>}
     </div>
   );
 }
@@ -121,19 +170,18 @@ function ForecastChart({ actualLogs, forecast, monitoring, accuracy, userId }: {
       })
     : [];
   const chartData = [...actualPoints, ...forecastPoints].sort((left, right) => left.time - right.time);
-  const trendLabel = titleCase(forecast?.trend_direction);
-  const historicalTrend = titleCase(monitoring?.trend_label);
+  const badgeTrendLabel = trendLabel(forecast?.trend_direction, t);
 
   return (
-    <Card title={t("monitoring.forecastCard")} action={forecast ? <Badge tone={trendBadgeTone(forecast.trend_direction)}>{trendLabel}</Badge> : <Badge>{t("monitoring.forecast")}</Badge>}>
+    <Card title={t("monitoring.forecastCard")} action={forecast ? <Badge tone={trendBadgeTone(forecast.trend_direction)}>{badgeTrendLabel}</Badge> : <Badge>{t("monitoring.forecast")}</Badge>}>
       <div className="forecast-status">
         {!forecast && <p>{t("monitoring.noForecastPrompt")}</p>}
-        {forecast && <p>{forecast.used_fallback ? "Fallback forecast" : "Model forecast"} - {forecast.model_version}</p>}
+        {forecast && <p>{forecast.used_fallback ? t("monitoring.fallbackForecast") : t("monitoring.modelForecast")} - {forecast.model_version}</p>}
 
-        <div className="forecast-range-controls" role="group" aria-label="Actual glucose history shown in forecast chart">
+        <div className="forecast-range-controls" role="group" aria-label={t("monitoring.historyRangeAria")}>
           {([8, 24, 48, "all"] as const).map((range) => (
             <button key={range} type="button" className={historyHours === range ? "active" : ""} onClick={() => setHistoryHours(range)}>
-              {range === "all" ? "All" : `${range}h`}
+              {range === "all" ? t("monitoring.all") : `${range}h`}
             </button>
           ))}
         </div>
@@ -145,7 +193,7 @@ function ForecastChart({ actualLogs, forecast, monitoring, accuracy, userId }: {
               dataKey="time"
               domain={[historyStartTime, lastActualTime + 4 * 60 * 60 * 1000]}
               tick={{ fontSize: 11 }}
-              tickFormatter={(value) => new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+              tickFormatter={(value) => formatForecastTick(Number(value), historyHours)}
               type="number"
             />
             <YAxis domain={[2, 16]} tick={{ fontSize: 11 }} />
@@ -159,15 +207,15 @@ function ForecastChart({ actualLogs, forecast, monitoring, accuracy, userId }: {
             <ReferenceArea y1={10} y2={16} fill="#f97316" fillOpacity={0.08} />
             <ReferenceLine x={Date.now()} stroke="#6b7280" strokeDasharray="4 4" />
             <Area dataKey="forecastBand" stroke="none" fill="#4f46e5" fillOpacity={0.15} connectNulls />
-            <Line name="Actual" dataKey="actual" stroke="#154539" strokeWidth={3} dot={<ForecastActualDot />} connectNulls={false} />
-            <Line name="Forecast" dataKey="forecast" stroke="#4f46e5" strokeWidth={3} strokeDasharray="7 5" dot={{ r: 4 }} connectNulls />
+            <Line name={t("monitoring.actual")} dataKey="actual" stroke="#154539" strokeWidth={3} dot={<ForecastActualDot />} connectNulls={false} />
+            <Line name={t("monitoring.forecast")} dataKey="forecast" stroke="#4f46e5" strokeWidth={3} strokeDasharray="7 5" dot={{ r: 4 }} connectNulls />
           </ComposedChart>
         </ResponsiveContainer>
       </div>
       <div className="forecast-actions">
         <div className="forecast-model-evidence">
-          <span>Forecast model: {forecast?.model_version ?? "Waiting for forecast"}</span>
-          <span>Trend support: {monitoring?.model_version ?? "Loading trend model"}</span>
+          <span>{t("monitoring.forecastModel")}: {forecast?.model_version ?? t("monitoring.waitingForForecast")}</span>
+          <span>{t("monitoring.trendSupport")}: {monitoring?.model_version ?? t("monitoring.loadingTrendModel")}</span>
         </div>
         <button type="button" className="secondary" disabled={refreshForecast.isPending} onClick={() => refreshForecast.mutate()}>
           {t("monitoring.refresh")}
@@ -199,7 +247,7 @@ export function Monitoring() {
   const auth = useAuth();
   const { t } = useI18n();
   const userId = auth.session?.userId ?? 1;
-  const [showAllReadings, setShowAllReadings] = useState(false);
+  const [readingsPage, setReadingsPage] = useState(0);
   const logs = useQuery({ queryKey: ["logs", userId], queryFn: () => api.logs(userId) });
   const monitoring = useQuery({ queryKey: ["monitoring", userId], queryFn: () => api.latestMonitoring(userId) });
   const accuracy = useQuery({ queryKey: ["forecast-accuracy", userId], queryFn: () => api.getForecastAccuracy(userId) });
@@ -210,19 +258,24 @@ export function Monitoring() {
     glucose_mmol: toMmol(log.glucose_level),
     is_fasting: log.is_fasting,
   }));
-  const forecastStatus = forecast.data?.predicted_low_alert ? "Low forecast" : forecast.data?.predicted_high_alert ? "High forecast" : forecast.data?.trend_direction ? titleCase(forecast.data.trend_direction) : "-";
-  const weekStatus = monitoring.data?.trend_label === "concerning" ? "Needs attention" : monitoring.data?.trend_label === "watch" ? "Watch closely" : monitoring.data?.trend_label ? "Looks steadier" : "-";
   const orderedReadings = [...(logs.data ?? [])].reverse();
-  const visibleReadings = showAllReadings ? orderedReadings : orderedReadings.slice(0, 8);
+  const readingsPerPage = 8;
+  const readingsPageCount = Math.max(1, Math.ceil(orderedReadings.length / readingsPerPage));
+  const safeReadingsPage = Math.min(readingsPage, readingsPageCount - 1);
+  const visibleReadings = orderedReadings.slice(safeReadingsPage * readingsPerPage, safeReadingsPage * readingsPerPage + readingsPerPage);
+
+  useEffect(() => {
+    if (readingsPage > readingsPageCount - 1) setReadingsPage(Math.max(0, readingsPageCount - 1));
+  }, [readingsPage, readingsPageCount]);
 
   return (
     <div className="page monitoring-page">
       <PageHeader
         title={t("monitoring.title")}
         subtitle={t("monitoring.subtitle")}
-        meta={forecast.data?.model_version ? `Forecast model: ${forecast.data.model_version}` : undefined}
+        meta={forecast.data?.model_version ? `${t("monitoring.forecastModel")}: ${forecast.data.model_version}` : undefined}
       />
-      {(logs.isError || monitoring.isError) && <ErrorState title="Monitoring data is unavailable" body="Glyco could not load one or more monitoring signals." />}
+      {(logs.isError || monitoring.isError) && <ErrorState title={t("monitoring.errorTitle")} body={t("monitoring.errorBody")} />}
 
       <section className="monitoring-hero-panel">
         <div>
@@ -230,28 +283,24 @@ export function Monitoring() {
           <h2>{forecastHeadline(forecast.data ?? null, monitoring.data, t)}</h2>
           <p>{forecastSummary(forecast.data ?? null, monitoring.data, t)}</p>
         </div>
-        <div className="monitoring-hero-stats">
-          <div><span>{t("monitoring.latestGlucose")}</span><strong>{latestLog ? `${latestLog.glucose_level} mg/dL` : "-"}</strong></div>
-          <div><span>{t("monitoring.forecast")}</span><strong>{forecastStatus}</strong></div>
-          <div><span>{t("monitoring.historicalTrend")}</span><strong>{weekStatus}</strong></div>
-          <div><span>{t("monitoring.evaluatedForecasts")}</span><strong>{accuracy.data?.total_evaluations ?? 0}</strong></div>
-          <div><span>{t("monitoring.learning")}</span><strong>{forecast.data?.calibration_applied ? t("monitoring.personalized") : t("monitoring.learning")}</strong></div>
-        </div>
       </section>
 
       <div className="monitoring-main-grid forecast-primary-grid">
-        {logs.isLoading ? <Card title={t("monitoring.forecastCard")}><LoadingState label="Loading glucose history" /></Card> : <ForecastChart actualLogs={actualLogs} forecast={forecast.data ?? null} monitoring={monitoring.data} accuracy={accuracy.data} userId={userId} />}
+        {logs.isLoading ? <Card title={t("monitoring.forecastCard")}><LoadingState label={t("monitoring.loadingHistory")} /></Card> : <ForecastChart actualLogs={actualLogs} forecast={forecast.data ?? null} monitoring={monitoring.data} accuracy={accuracy.data} userId={userId} />}
       </div>
 
       <div className="monitoring-main-grid">
-        <Card title={showAllReadings ? t("monitoring.allReadings") : t("monitoring.recentHistory")} action={<Activity size={18} />}>
+        <Card title={t("monitoring.recentHistory")} action={<Activity size={18} />}>
           {(logs.data ?? []).length ? (
             <div className="reading-history">
-              <div className="reading-history-controls" role="group" aria-label="Reading history range">
-                <button type="button" className={!showAllReadings ? "active" : ""} onClick={() => setShowAllReadings(false)}>{t("monitoring.recent")}</button>
-                <button type="button" className={showAllReadings ? "active" : ""} onClick={() => setShowAllReadings(true)}>{t("monitoring.all")} {orderedReadings.length}</button>
+              <div className="reading-history-pager">
+                <span>{t("monitoring.page")} {safeReadingsPage + 1} / {readingsPageCount}</span>
+                <div className="reading-history-controls" role="group" aria-label={t("monitoring.readingPaginationAria")}>
+                  <button type="button" disabled={safeReadingsPage === 0} onClick={() => setReadingsPage((page) => Math.max(0, page - 1))}>{t("common.previous")}</button>
+                  <button type="button" disabled={safeReadingsPage >= readingsPageCount - 1} onClick={() => setReadingsPage((page) => Math.min(readingsPageCount - 1, page + 1))}>{t("common.next")}</button>
+                </div>
               </div>
-              <div className={showAllReadings ? "compact-table reading-history-table all-readings" : "compact-table reading-history-table"}>
+              <div className="compact-table reading-history-table">
                 {visibleReadings.map((log) => (
                   <div key={log.id}>
                     <span>{log.reading_time || log.created_at ? new Date(log.reading_time ?? log.created_at ?? "").toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : log.log_date}</span>
@@ -268,7 +317,7 @@ export function Monitoring() {
           <div className="forecast-action-panel">
             <section>
               <span>{t("monitoring.mainAction")}</span>
-              <strong>{forecast.data?.recommendation ?? t("monitoring.defaultAction")}</strong>
+              <strong>{translateForecastRecommendation(forecast.data?.recommendation, t)}</strong>
             </section>
             <section>
               <span>{t("monitoring.nextCheck")}</span>
@@ -276,9 +325,9 @@ export function Monitoring() {
             </section>
             <div className="forecast-context-chips">
               <Badge>{latestLog ? `${latestLog.glucose_level} mg/dL` : t("monitoring.noReading")}</Badge>
-              <Badge tone={trendBadgeTone(forecast.data?.trend_direction)}>{forecast.data?.trend_direction ?? "forecast pending"}</Badge>
+              <Badge tone={trendBadgeTone(forecast.data?.trend_direction)}>{forecast.data?.trend_direction ? trendLabel(forecast.data.trend_direction, t) : t("monitoring.forecastPending")}</Badge>
               <Badge tone={forecast.data?.predicted_low_alert ? "danger" : forecast.data?.predicted_high_alert ? "warning" : "good"}>{forecast.data?.predicted_low_alert ? t("monitoring.lowAlert") : forecast.data?.predicted_high_alert ? t("monitoring.highAlert") : t("monitoring.noAlert")}</Badge>
-              <Badge>{forecast.data?.forecast_quality ?? "needs_more_data"}</Badge>
+              <Badge>{forecastQualityValue(forecast.data?.forecast_quality, t)}</Badge>
             </div>
           </div>
         </Card>
