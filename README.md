@@ -1,7 +1,6 @@
 # Glyco
 
-Glyco is a full-stack clinical support MVP for Type 2 diabetes risk, monitoring, reporting, and assisted conversation. It is designed for a FIT CC Coding Challenge demo, but it is also structured so human reviewers and AI agents can understand the application end-to-end without guessing how any major piece works.
-
+Glyco is a full-stack clinical support MVP for Type 2 diabetes risk, monitoring, reporting, and assisted conversation. It is designed for a FIT CC Coding Challenge.
 Glyco combines:
 
 - a React + Vite frontend
