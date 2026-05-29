@@ -4,6 +4,7 @@ from statistics import mean
 from sqlalchemy.orm import Session
 
 from app.agent.bandit import RecommendationBandit, default_recommendations
+from app.agent.language import detect_language, localize_provider_error
 from app.agent.llm_client import get_llm_client, get_llm_status, build_rich_system_prompt
 from app.agent.safety import safety_note, urgent_message_if_needed
 from app.agent.tools import get_logs, get_profile, retrieve_guideline_snippets, run_risk_check, run_trend_check
@@ -416,6 +417,7 @@ def _is_low_quality_llm_answer(answer: str | None) -> bool:
 def chat_with_agent(db: Session, user_id: int, message: str) -> dict:
     """Build an agent response from trained-model tools and adaptive memory."""
     user = db.get(models.User, user_id)
+    language = detect_language(message)
     urgent = urgent_message_if_needed(message)
     
     if urgent:
@@ -424,7 +426,7 @@ def chat_with_agent(db: Session, user_id: int, message: str) -> dict:
             "answer": urgent,
             "tool_calls": tools_context["tool_calls"],
             "guideline_snippets": tools_context["guidelines"],
-            "safety_note": safety_note(),
+            "safety_note": safety_note(language),
             "patient_name": user.full_name if user else "Demo patient",
             "llm_mode": "safety",
             "llm_model": "urgent-safety",
@@ -438,7 +440,7 @@ def chat_with_agent(db: Session, user_id: int, message: str) -> dict:
     history = _load_chat_history(db, user_id, limit=10)
     
     # 2. Build detailed system prompt
-    system_prompt = build_rich_system_prompt(tools_context)
+    system_prompt = build_rich_system_prompt(tools_context, language=language)
     
     # 3. Assemble full messages list
     messages = [{"role": "system", "content": system_prompt}] + history + [{"role": "user", "content": message}]
@@ -472,8 +474,10 @@ def chat_with_agent(db: Session, user_id: int, message: str) -> dict:
         elif llm_status.get("provider") == "ollama":
             hint = "Ensure Ollama is running and GLYCO_OLLAMA_URL is reachable."
 
-        detail_suffix = f" (Details: {llm_error_detail})" if llm_error_detail else ""
-        answer = f"Error: Glyco chatbot couldn't reach the configured LLM provider.{detail_suffix} {hint}"
+        if language == "bs":
+            hint = "Provjerite API ključ za LLM provajdera i pokušajte ponovo."
+        detail_suffix = f" (Detalji: {llm_error_detail})" if language == "bs" and llm_error_detail else f" (Details: {llm_error_detail})" if llm_error_detail else ""
+        answer = localize_provider_error(language, detail_suffix, hint)
         llm_mode = "error"
         llm_model = "error"
     else:
@@ -491,7 +495,7 @@ def chat_with_agent(db: Session, user_id: int, message: str) -> dict:
         "answer": answer,
         "tool_calls": tools_context["tool_calls"],
         "guideline_snippets": tools_context["guidelines"],
-        "safety_note": safety_note(),
+        "safety_note": safety_note(language),
         "patient_name": user.full_name if user else "Demo patient",
         "llm_mode": llm_mode,
         "llm_model": llm_model,

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.agent.language import detect_language, localize_safety_note, localize_urgent_message
+
 URGENT_TERMS = {
     "chest pain",
     "shortness of breath",
@@ -14,17 +16,16 @@ URGENT_TERMS = {
 }
 
 
-def safety_note() -> str:
-    return "Glyco can help you interpret logged patterns and prepare questions, but it does not diagnose or replace a clinician."
+def safety_note(language: str = "en") -> str:
+    """Return the standard safety note localized for the active conversation."""
+    return localize_safety_note(language)
 
 
 def urgent_message_if_needed(message: str) -> str | None:
+    """Return a localized urgent boundary message if the text contains red flags."""
     # This boundary runs before generation so urgent symptoms bypass normal
     # coaching and produce a direct escalation message.
     lowered = message.lower()
     if any(term in lowered for term in URGENT_TERMS):
-        return (
-            "Your message includes symptoms that may require urgent medical attention. "
-            "If symptoms are severe, sudden, or worsening, contact emergency services or a clinician immediately."
-        )
+        return localize_urgent_message(detect_language(message))
     return None

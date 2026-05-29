@@ -16,7 +16,7 @@ def create_report_for_agent(db: Session, user_id: int, report_type: str = "docto
     user = db.get(models.User, user_id)
     risk = db.query(models.RiskAssessment).filter(models.RiskAssessment.user_id == user_id).order_by(models.RiskAssessment.created_at.desc()).first()
     monitoring = db.query(models.MonitoringAssessment).filter(models.MonitoringAssessment.user_id == user_id).order_by(models.MonitoringAssessment.created_at.desc()).first()
-    logs = db.query(models.HealthLog).filter(models.HealthLog.user_id == user_id).order_by(models.HealthLog.log_date.asc()).all()
+    logs = db.query(models.HealthLog).filter(models.HealthLog.user_id == user_id).order_by(models.HealthLog.created_at.asc(), models.HealthLog.log_date.asc()).all()
     content = build_report(normalized, user, risk, monitoring, logs)
     row = models.Report(user_id=user_id, report_type=normalized, content_json=content)
     db.add(row)

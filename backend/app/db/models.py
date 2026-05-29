@@ -38,6 +38,7 @@ class Profile(Base):
     heart_disease_history: Mapped[bool] = mapped_column(Boolean, default=False)
     difficulty_walking: Mapped[bool] = mapped_column(Boolean, default=False)
     family_history_diabetes: Mapped[bool] = mapped_column(Boolean, default=False)
+    forecast_personalization_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     fasting_glucose_optional: Mapped[float | None] = mapped_column(Float)
     hba1c_optional: Mapped[float | None] = mapped_column(Float)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -83,6 +84,11 @@ class HealthLog(Base):
     @property
     def glucose_level(self) -> float:
         return self.fasting_glucose
+
+    @property
+    def reading_time(self) -> datetime:
+        """Return the actual time represented by this glucose reading."""
+        return self.created_at
 
 
 class MonitoringAssessment(Base):

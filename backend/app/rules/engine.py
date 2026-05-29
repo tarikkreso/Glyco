@@ -59,7 +59,7 @@ def estimate_risk_probability(profile) -> tuple[float, list[dict]]:
 
 
 def monitoring_state(logs) -> dict:
-    ordered = sorted(logs, key=lambda log: log.log_date)
+    ordered = sorted(logs, key=lambda log: (getattr(log, "created_at", None) or log.log_date, log.log_date))
     recent = ordered[-14:]
     glucose = [log.glucose_level for log in recent if log.glucose_level is not None]
     if not glucose:

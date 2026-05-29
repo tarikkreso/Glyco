@@ -14,6 +14,19 @@ MATCH_TOLERANCE_MINUTES = 45
 CALIBRATION_BIAS_EMA_ALPHA = 0.2
 
 
+def forecast_personalization_enabled(db: Session, user_id: int) -> bool:
+    """Return whether this user's latest profile allows forecast learning."""
+    profile = (
+        db.query(models.Profile)
+        .filter(models.Profile.user_id == user_id)
+        .order_by(models.Profile.created_at.desc())
+        .first()
+    )
+    if profile is None:
+        return True
+    return bool(getattr(profile, "forecast_personalization_enabled", True))
+
+
 def _as_mmol(value: float) -> float:
     """Normalize glucose values that may be stored as mg/dL or mmol/L."""
     return float(value) / 18.015 if float(value) > 40 else float(value)
@@ -74,6 +87,8 @@ def _refresh_calibration(db: Session, user_id: int, horizon: int, model_version:
 
 def evaluate_forecasts_for_log(db: Session, log: models.HealthLog) -> int:
     """Match a new glucose log to pending forecast horizons and store errors."""
+    if not forecast_personalization_enabled(db, log.user_id):
+        return 0
     actual_time = log.created_at or datetime.combine(log.log_date, datetime.min.time())
     actual_mmol = _as_mmol(log.glucose_level)
     start = actual_time - timedelta(minutes=max(HORIZONS) + MATCH_TOLERANCE_MINUTES)
@@ -137,6 +152,8 @@ def evaluate_forecasts_for_log(db: Session, log: models.HealthLog) -> int:
 
 def calibration_snapshot(db: Session, user_id: int, model_version: str | None) -> dict[str, dict[str, float | int]]:
     """Return per-horizon calibration rows for a user and model version."""
+    if not forecast_personalization_enabled(db, user_id):
+        return {}
     rows = (
         db.query(models.GlucoseForecastCalibration)
         .filter(
@@ -158,6 +175,12 @@ def calibration_snapshot(db: Session, user_id: int, model_version: str | None) -
 def apply_calibration(db: Session, result: dict[str, Any]) -> dict[str, Any]:
     """Apply learned user calibration to a forecast result when enough data exists."""
     calibrated = {**result, "predictions": dict(result["predictions"]), "confidence_intervals": dict(result["confidence_intervals"])}
+    if not forecast_personalization_enabled(db, int(result["user_id"])):
+        calibrated["calibration_applied"] = False
+        calibrated["personalization_enabled"] = False
+        calibrated["personal_mae_per_horizon"] = None
+        calibrated["forecast_quality"] = "personalization_off"
+        return calibrated
     snapshot = calibration_snapshot(db, int(result["user_id"]), result.get("model_version"))
     applied = False
     personal_mae: dict[str, float] = {}
@@ -194,6 +217,7 @@ def apply_calibration(db: Session, result: dict[str, Any]) -> dict[str, Any]:
         calibrated["predicted_high_alert"],
     )
     calibrated["calibration_applied"] = applied
+    calibrated["personalization_enabled"] = True
     calibrated["personal_mae_per_horizon"] = personal_mae or None
     calibrated["forecast_quality"] = "calibrated" if applied else "learning" if personal_mae else "needs_more_data"
     return calibrated
@@ -201,6 +225,7 @@ def apply_calibration(db: Session, result: dict[str, Any]) -> dict[str, Any]:
 
 def forecast_accuracy_summary(db: Session, user_id: int) -> dict[str, Any]:
     """Return aggregate forecast accuracy and recent evaluation rows for a user."""
+    personalization_enabled = forecast_personalization_enabled(db, user_id)
     evaluations = (
         db.query(models.GlucoseForecastEvaluation)
         .filter(models.GlucoseForecastEvaluation.user_id == user_id)
@@ -220,6 +245,7 @@ def forecast_accuracy_summary(db: Session, user_id: int) -> dict[str, Any]:
         }
     return {
         "user_id": user_id,
+        "personalization_enabled": personalization_enabled,
         "total_evaluations": len(evaluations),
         "per_horizon": by_horizon,
         "latest": [

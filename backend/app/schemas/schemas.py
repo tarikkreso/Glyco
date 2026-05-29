@@ -37,6 +37,7 @@ class ProfileIn(BaseModel):
     heart_disease_history: bool = False
     difficulty_walking: bool = False
     family_history_diabetes: bool = True
+    forecast_personalization_enabled: bool = True
     fasting_glucose_optional: float | None = None
     hba1c_optional: float | None = None
 
@@ -53,6 +54,7 @@ class HealthLogIn(BaseModel):
     user_id: int = 1
     glucose_level: float = Field(118, ge=40, le=500)
     is_fasting: bool = True
+    reading_time: datetime | None = None
 
 
 class HealthLogOut(BaseModel):
@@ -71,6 +73,7 @@ class HealthLogOut(BaseModel):
     activity_minutes: int | None = None
     notes: str | None = None
     created_at: datetime
+    reading_time: datetime
     model_config = {"from_attributes": True}
 
 
@@ -115,6 +118,7 @@ class GlucoseForecastOut(BaseModel):
     horizon_minutes: list[int]
     created_at: datetime | None = None
     calibration_applied: bool = False
+    personalization_enabled: bool = True
     personal_mae_per_horizon: dict[str, float] | None = None
     forecast_quality: str | None = None
 

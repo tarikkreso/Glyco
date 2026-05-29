@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime, timedelta
 from sqlalchemy.orm import Session
 
 from app.db import models
@@ -94,7 +94,13 @@ def _age_bucket_display(age: int) -> str:
 
 
 def create_monitoring_assessment(db: Session, user_id: int):
-    logs = db.query(models.HealthLog).filter(models.HealthLog.user_id == user_id).order_by(models.HealthLog.log_date.asc()).all()
+    cutoff = datetime.utcnow() - timedelta(days=180)
+    logs = (
+        db.query(models.HealthLog)
+        .filter(models.HealthLog.user_id == user_id, models.HealthLog.created_at >= cutoff)
+        .order_by(models.HealthLog.created_at.asc(), models.HealthLog.log_date.asc())
+        .all()
+    )
     model_result = predict_monitoring(logs)
     fallback_result = monitoring_state(logs)
     result = {

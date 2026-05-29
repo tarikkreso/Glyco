@@ -1,8 +1,10 @@
-from datetime import date, datetime, timedelta
-from random import Random
+import os
+from datetime import datetime
+
 from app.db.database import SessionLocal
 from app.db import models
 from app.rules.engine import calculate_bmi
+from app.services.synthetic_seed import DemoUserSpec, SyntheticSeedConfig, seed_demo_users, seed_synthetic_dataset
 
 
 def seed_demo_data() -> None:
@@ -59,48 +61,60 @@ def seed_demo_data() -> None:
                     setattr(profile, key, value)
                 profile.updated_at = datetime.utcnow()
 
+        # Seed richer, recent time-series logs for demo accounts.
+        # Guarantees multi-day history so monitoring model availability does not
+        # depend on time-of-day.
+        seed_demo_users(
+            db,
+            [
+                DemoUserSpec(demo_id="demo-monitoring", full_name="Sarah Kovac", band="high", days=45, logs_per_day=4),
+                DemoUserSpec(demo_id="demo-high-risk", full_name="Milan Hadzic", band="high", days=30, logs_per_day=4),
+                DemoUserSpec(demo_id="demo-low-risk", full_name="Lejla Moric", band="low", days=30, logs_per_day=4),
+                # Extra demo users for QA / manual testing.
+                DemoUserSpec(demo_id="demo-improving", full_name="Hana Novak", fixed_id=101, band="elevated", days=60, logs_per_day=4),
+                DemoUserSpec(demo_id="demo-high-variability", full_name="Marko Jukic", fixed_id=102, band="high", days=45, logs_per_day=5),
+                DemoUserSpec(demo_id="demo-hypo-watch", full_name="Ema Horvat", fixed_id=103, band="low", days=45, logs_per_day=4),
+                DemoUserSpec(demo_id="demo-night-shift", full_name="Ivan Knezevic", fixed_id=104, band="elevated", days=45, logs_per_day=4),
+                DemoUserSpec(demo_id="demo-weekend-spikes", full_name="Petra Babic", fixed_id=105, band="elevated", days=45, logs_per_day=4),
+                DemoUserSpec(demo_id="demo-stable", full_name="Luka Kralj", fixed_id=106, band="low", days=60, logs_per_day=3),
+            ],
+            seed=42,
+        )
+
         sarah = users_by_demo_id["demo-monitoring"]
-        sarah_log_count = db.query(models.HealthLog).filter(models.HealthLog.user_id == sarah.id).count()
-        if sarah_log_count < 20:
-            rng = Random(42)
-            pattern_mmol = {
-                6: 7.8,
-                8: 8.4,
-                10: 7.2,
-                12: 7.0,
-                14: 9.1,
-                16: 7.8,
-                18: 7.2,
-                20: 9.8,
-                22: 8.1,
-                0: 7.3,
-                2: 6.9,
-                4: 7.1,
-            }
-            raw_start = datetime.utcnow() - timedelta(hours=48)
-            start_time = raw_start.replace(hour=(raw_start.hour // 2) * 2, minute=0, second=0, microsecond=0)
-            for idx in range(24):
-                timestamp = start_time + timedelta(hours=idx * 2)
-                baseline = pattern_mmol[timestamp.hour]
-                glucose_mmol = max(3.5, baseline + rng.gauss(0.0, 0.3))
-                glucose_mgdl = round(glucose_mmol * 18.015, 1)
-                is_fasting = timestamp.hour not in {6, 12, 18}
-                db.add(models.HealthLog(
-                    user_id=sarah.id,
-                    log_date=timestamp.date(),
-                    is_fasting=is_fasting,
-                    fasting_glucose=glucose_mgdl,
-                    post_meal_glucose=None if is_fasting else glucose_mgdl,
-                    weight_kg=96,
-                    systolic_bp=136 + (idx % 4) * 2,
-                    diastolic_bp=84 + (idx % 3),
-                    activity_minutes=18 + (idx % 5),
-                    notes="Seeded 48-hour Type 2 glucose pattern",
-                    created_at=timestamp,
-                ))
         share = db.query(models.FamilyShare).filter(models.FamilyShare.share_token == "demo-family-sarah").first()
         if not share:
             db.add(models.FamilyShare(user_id=sarah.id, shared_with_name="Care Circle", relationship="Family", share_token="demo-family-sarah", permissions_json={"read_only": True}))
         db.commit()
+    finally:
+        db.close()
+
+
+def seed_synthetic_from_env() -> dict[str, int] | None:
+    """Optionally seed a much larger synthetic dataset when explicitly enabled."""
+
+    enabled = os.getenv("GLYCO_SEED_SYNTHETIC", "").strip().lower() in {"1", "true", "yes", "on"}
+    if not enabled:
+        return None
+
+    def _int_env(name: str, default: int) -> int:
+        raw = os.getenv(name)
+        if raw is None or not raw.strip():
+            return default
+        try:
+            return int(raw)
+        except ValueError:
+            return default
+
+    config = SyntheticSeedConfig(
+        num_users=_int_env("GLYCO_SEED_USERS", 50),
+        days=_int_env("GLYCO_SEED_DAYS", 60),
+        logs_per_day=_int_env("GLYCO_SEED_LOGS_PER_DAY", 4),
+        seed=_int_env("GLYCO_SEED_RANDOM", 1337),
+    )
+
+    db = SessionLocal()
+    try:
+        return seed_synthetic_dataset(db, config)
     finally:
         db.close()

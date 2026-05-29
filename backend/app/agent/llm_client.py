@@ -3,13 +3,44 @@ from __future__ import annotations
 import logging
 import os
 import time
+from pathlib import Path
 from statistics import mean
 from typing import Protocol
 
 import httpx
 
+from app.agent.language import detect_language, language_name
+
 logger = logging.getLogger(__name__)
 GEMINI_COOLDOWN_UNTIL = 0.0
+
+
+def llm_network_enabled() -> bool:
+    """Return whether LLM clients are allowed to make outbound HTTP calls."""
+    if os.getenv("PYTEST_CURRENT_TEST"):
+        return False
+    return os.getenv("GLYCO_DISABLE_LLM_NETWORK", "").strip().lower() not in {"1", "true", "yes", "on"}
+
+
+def _load_env_files() -> None:
+    """Refresh provider-related environment variables from local .env files."""
+    module_path = Path(__file__).resolve()
+    repo_root = module_path.parents[3] if len(module_path.parents) > 3 else module_path.parents[-1]
+    env_paths = [repo_root / "backend" / ".env", repo_root / ".env"]
+    for env_path in env_paths:
+        if not env_path.exists():
+            continue
+        for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            # Respect explicitly-set environment variables (including empty
+            # strings set by tests to prevent re-population).
+            if key and key not in os.environ:
+                os.environ[key] = value
 
 
 def _gemini_cooldown_seconds() -> float:
@@ -66,6 +97,9 @@ class GroqClient:
 
     def generate(self, messages: list[dict], tools_context: dict) -> str | None:
         self.last_error = None
+        if not llm_network_enabled():
+            self.last_error = "LLM network disabled"
+            return None
         if not self.api_key:
             logger.warning("Groq generation skipped: GROQ_API_KEY is not set")
             self.last_error = "API key is not set"
@@ -138,6 +172,9 @@ class DeepSeekClient:
 
     def generate(self, messages: list[dict], tools_context: dict) -> str | None:
         self.last_error = None
+        if not llm_network_enabled():
+            self.last_error = "LLM network disabled"
+            return None
         if not self.api_key:
             logger.warning("DeepSeek generation skipped: DEEPSEEK_API_KEY is not set")
             self.last_error = "API key is not set"
@@ -295,6 +332,7 @@ PATIENT PERSONALIZED DIET CARE PLAN:
 
 def _build_concise_prompt(messages: list[dict], tools_context: dict) -> str:
     user_message = next((item["content"] for item in reversed(messages) if item.get("role") == "user"), "")
+    target_language = language_name(detect_language(user_message))
     summary = _patient_summary(tools_context)
     profile = summary["profile"]
     risk = summary["risk"]
@@ -310,6 +348,7 @@ def _build_concise_prompt(messages: list[dict], tools_context: dict) -> str:
     return f"""You are Glyco, a careful diabetes risk and monitoring assistant.
 
 Core rules:
+- Required response language: {target_language}. Write the entire answer in {target_language}.
 - **Language & Translation**: You MUST detect the language of the user's latest query (e.g. Bosnian, Croatian, Serbian, or any other language) and write the entire response, including any headings or bullets, in that exact language.
 - **Direct Answer First**: Always address the user's specific question or topic directly and scientifically at the very beginning of your response before transitioning to general glucose patterns. If they ask about alternative medicine, myths, or home remedies (like curing diabetes by drinking warm water), clearly debunk it with scientific facts while maintaining a supportive clinical tone (e.g. explain that drinking warm water cannot cure diabetes, but drinking water generally supports hydration).
 - Do not diagnose. Do not mention or reveal "tool context". Do not copy raw data.
@@ -339,6 +378,7 @@ Answer:"""
 
 def _build_gemini_prompt(messages: list[dict], tools_context: dict) -> str:
     user_message = next((item["content"] for item in reversed(messages) if item.get("role") == "user"), "")
+    target_language = language_name(detect_language(user_message))
     summary = _patient_summary(tools_context)
     profile = summary["profile"]
     risk = summary["risk"]
@@ -360,6 +400,7 @@ def _build_gemini_prompt(messages: list[dict], tools_context: dict) -> str:
     return f"""You are Glyco, a careful diabetes risk and monitoring assistant inside a testing MVP.
 
 Core rules:
+- Required response language: {target_language}. Write the entire answer in {target_language}, including all headings and bullets.
 - **Language & Translation**: You MUST detect the language of the user's latest query (e.g. Bosnian, Croatian, Serbian, or any other language) and write the entire response, including ALL section headers and bulletins, in that exact language. If the user asks in Bosnian/Croatian/Serbian, you MUST translate the required section headers to:
   * "Bottom line" -> "Zaključak"
   * "What I see" -> "Analiza stanja"
@@ -459,7 +500,8 @@ If the user asks about family support, add a "How family can help" section befor
 Target length: 240-380 words. Complete every section. End with a full sentence."""
 
 
-def build_rich_system_prompt(tools_context: dict) -> str:
+def build_rich_system_prompt(tools_context: dict, language: str = "en") -> str:
+    """Build the rich clinical system prompt with an explicit response language."""
     summary = _patient_summary(tools_context)
     profile = summary["profile"]
     risk = summary["risk"]
@@ -494,9 +536,18 @@ def build_rich_system_prompt(tools_context: dict) -> str:
         logs_lines.append(log_str)
     logs_block = "\n".join(logs_lines) if logs_lines else "- No logs available."
 
+    target_language = language_name(language)
+    header_rules = (
+        'Use these Bosnian section headers exactly: "Zaključak", "Analiza stanja", "Zašto je to važno", '
+        '"Šta učiniti ove sedmice", "Pitanja za doktora", "Sigurnosna napomena".'
+        if language == "bs"
+        else 'Use these English section headers exactly: "Bottom line", "What I see", "Why it matters", "What to do this week", "Questions for the doctor", "Safety note".'
+    )
+
     return f"""You are Glyco, a careful diabetes risk and monitoring assistant inside a testing MVP.
 
 Core rules:
+- **Required response language**: The user's latest message language is {target_language}. Write the entire response in {target_language}, including every heading, bullet, disclaimer, and explanation. {header_rules}
 - **Language & Translation**: You MUST detect the language of the user's latest query (e.g. Bosnian, Croatian, Serbian, or any other language) and write the entire response, including ALL section headers and bulletins, in that exact language. If the user asks in Bosnian/Croatian/Serbian, you MUST translate the required section headers to:
   * "Bottom line" -> "Zaključak"
   * "What I see" -> "Analiza stanja"
@@ -574,7 +625,7 @@ Flags and trend notes:
 Curated guidance:
 {guidance_lines}
 
-Write the response with exactly these sections:
+Write the response with exactly these sections in {target_language}:
 
 Bottom line
 - Give a direct answer in 1-2 sentences.
@@ -646,6 +697,8 @@ class GeminiClient:
         return (answer or None), candidate.get("finishReason")
 
     def generate(self, messages: list[dict], tools_context: dict) -> str | None:
+        if not llm_network_enabled():
+            return None
         if gemini_is_rate_limited():
             logger.warning("Gemini generation skipped: rate-limit cooldown is active")
             return None
@@ -686,6 +739,8 @@ class OllamaClient:
         self.timeout = float(os.getenv("GLYCO_OLLAMA_TIMEOUT_SECONDS", "120"))
 
     def generate(self, messages: list[dict], tools_context: dict) -> str | None:
+        if not llm_network_enabled():
+            return None
         prompt = _build_concise_prompt(messages, tools_context)
         try:
             response = httpx.post(
@@ -724,6 +779,7 @@ class ChainedLLMClient:
 
 
 def _provider_order() -> list[str]:
+    _load_env_files()
     provider = os.getenv("GLYCO_LLM_PROVIDER", "").lower()
     
     has_deepseek = bool(_first_env("DEEPSEEK_API_KEY", "GLYCO_DEEPSEEK_API_KEY", "OPENROUTER_API_KEY", "GLYCO_OPENROUTER_API_KEY"))
@@ -780,6 +836,7 @@ def _provider_order() -> list[str]:
 
 
 def get_llm_client() -> LLMClient:
+    _load_env_files()
     clients: list[LLMClient] = []
     for provider in _provider_order():
         if provider == "deepseek":
@@ -843,6 +900,7 @@ def _get_ollama_status() -> dict:
 
 
 def get_llm_status() -> dict:
+    _load_env_files()
     provider_order = _provider_order()
     deepseek = _get_deepseek_status()
     gemini = _get_gemini_status()

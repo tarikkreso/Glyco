@@ -49,7 +49,7 @@ def _plan_context(db: Session, user_id: int) -> dict:
     user = db.get(models.User, user_id)
     risk, profile = _latest_risk(db, user_id)
     monitoring = _latest_monitoring(db, user_id)
-    logs = db.query(models.HealthLog).filter(models.HealthLog.user_id == user_id).order_by(models.HealthLog.log_date.asc(), models.HealthLog.created_at.asc()).all()
+    logs = db.query(models.HealthLog).filter(models.HealthLog.user_id == user_id).order_by(models.HealthLog.created_at.asc(), models.HealthLog.log_date.asc()).all()
     recent = logs[-14:]
     fasting_values = [log.glucose_level for log in recent if log.glucose_level is not None and log.is_fasting]
     post_values = [log.glucose_level for log in recent if log.glucose_level is not None and not log.is_fasting]
@@ -204,7 +204,10 @@ Safe fallback plan to improve, not ignore:
             model_name = getattr(llm_client, "model_name", "")
             if "liquid" in str(model_name).lower():
                 provider_name = "liquid"
-        return {**fallback, **plan, "source": f"{provider_name}-personalized"}
+        merged = {**fallback, **plan, "source": f"{provider_name}-personalized"}
+        # Never allow the LLM output to clobber the required signals payload.
+        merged["signals"] = fallback.get("signals", {})
+        return merged
     except Exception as exc:
         logger.warning("Personalized care plan generation failed: %s", exc)
         return None

@@ -35,10 +35,11 @@ def get_profile(db: Session, user_id: int) -> dict | None:
 
 def get_logs(db: Session, user_id: int, days: int = 7) -> list[dict]:
     start = date.today() - timedelta(days=days)
-    rows = db.query(models.HealthLog).filter(models.HealthLog.user_id == user_id, models.HealthLog.log_date >= start).order_by(models.HealthLog.log_date.asc()).all()
+    rows = db.query(models.HealthLog).filter(models.HealthLog.user_id == user_id, models.HealthLog.log_date >= start).order_by(models.HealthLog.created_at.asc(), models.HealthLog.log_date.asc()).all()
     return [
         {
             "date": row.log_date.isoformat(),
+            "reading_time": row.created_at.isoformat(),
             "glucose_level": row.glucose_level,
             "is_fasting": row.is_fasting,
             "fasting_glucose": row.fasting_glucose,
@@ -91,7 +92,7 @@ def generate_report(db: Session, user_id: int, report_type: str = "doctor") -> d
     user = db.get(models.User, user_id)
     risk = db.query(models.RiskAssessment).filter(models.RiskAssessment.user_id == user_id).order_by(models.RiskAssessment.created_at.desc()).first()
     monitoring = db.query(models.MonitoringAssessment).filter(models.MonitoringAssessment.user_id == user_id).order_by(models.MonitoringAssessment.created_at.desc()).first()
-    logs = db.query(models.HealthLog).filter(models.HealthLog.user_id == user_id).order_by(models.HealthLog.log_date.asc()).all()
+    logs = db.query(models.HealthLog).filter(models.HealthLog.user_id == user_id).order_by(models.HealthLog.created_at.asc(), models.HealthLog.log_date.asc()).all()
     return build_report(report_type, user, risk, monitoring, logs)
 
 

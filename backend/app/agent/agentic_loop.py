@@ -9,6 +9,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from app.agent.llm_client import gemini_is_rate_limited, note_gemini_rate_limit
+from app.agent.language import detect_language, language_name
 from app.agent.tool_registry import context_from_tool_results, execute_agent_tool, gemini_tool_declarations
 
 logger = logging.getLogger(__name__)
@@ -21,6 +22,7 @@ def _gemini_configured() -> bool:
 
 
 def _system_prompt(user_message: str) -> str:
+    target_language = language_name(detect_language(user_message))
     return f"""You are Glyco, a real tool-calling diabetes support agent.
 
 You must use tools before answering. Do not answer from memory alone.
@@ -29,6 +31,7 @@ The backend binds tools to the current user; never ask for or invent a user id.
 Choose tools based on the user's question. For broad questions such as "Should I worry this week?", "What changed?", "What should I do next?", or family/doctor preparation, use the full clinical context: profile, logs, risk, Bayesian state, trend, guidelines, learning memory, and Thompson-ranked recommendations. For narrower questions, call only the tools needed to answer safely.
 
 Safety rules:
+- Required response language: {target_language}. Write the whole final answer in {target_language}.
 - Answer in the same language as the user's latest message. If the language is unclear, use clear English.
 - Do not diagnose diabetes.
 - Do not prescribe treatment or medication changes.

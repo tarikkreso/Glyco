@@ -5,7 +5,7 @@ from sqlalchemy import inspect, text
 
 from app.api.routes import router
 from app.db.database import Base, engine
-from app.services.seed import seed_demo_data
+from app.services.seed import seed_demo_data, seed_synthetic_from_env
 
 
 def _load_env_file() -> None:
@@ -34,16 +34,24 @@ Base.metadata.create_all(bind=engine)
 def _ensure_lightweight_schema_updates() -> None:
     """Apply tiny SQLite-safe updates for local demo databases."""
     inspector = inspect(engine)
-    if "health_logs" not in inspector.get_table_names():
-        return
-    columns = {column["name"] for column in inspector.get_columns("health_logs")}
-    if "is_fasting" not in columns:
+    table_names = inspector.get_table_names()
+    if "health_logs" in table_names:
+        columns = {column["name"] for column in inspector.get_columns("health_logs")}
+    else:
+        columns = set()
+    if "health_logs" in table_names and "is_fasting" not in columns:
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE health_logs ADD COLUMN is_fasting BOOLEAN DEFAULT 1"))
+    if "profiles" in table_names:
+        profile_columns = {column["name"] for column in inspector.get_columns("profiles")}
+        if "forecast_personalization_enabled" not in profile_columns:
+            with engine.begin() as connection:
+                connection.execute(text("ALTER TABLE profiles ADD COLUMN forecast_personalization_enabled BOOLEAN DEFAULT 1"))
 
 
 _ensure_lightweight_schema_updates()
 seed_demo_data()
+seed_synthetic_from_env()
 
 app = FastAPI(title="Glyco API", version="0.1.0")
 

@@ -48,6 +48,30 @@ flowchart LR
 
 The backend is the control plane. The frontend is a thin experience layer over persisted assessments, reports, alerts, and agent responses.
 
+## Seed + Test Data
+
+By default, the backend seeds a richer demo dataset on startup:
+
+- The original demo users (`demo-monitoring`, `demo-high-risk`, `demo-low-risk`) are always created.
+- Each demo user gets multi-week *recent* glucose logs (so monitoring/forecast features work immediately).
+- Additional demo logins are also created for manual QA:
+  - `demo-improving` (user id 101)
+  - `demo-high-variability` (user id 102)
+  - `demo-hypo-watch` (user id 103)
+  - `demo-night-shift` (user id 104)
+  - `demo-weekend-spikes` (user id 105)
+  - `demo-stable` (user id 106)
+
+If you want an even larger dataset (many more users + many more recent logs), enable the optional synthetic seeder:
+
+- `GLYCO_SEED_SYNTHETIC=1`
+- `GLYCO_SEED_USERS` (default `50`)
+- `GLYCO_SEED_DAYS` (default `60`)
+- `GLYCO_SEED_LOGS_PER_DAY` (default `4`)
+- `GLYCO_SEED_RANDOM` (default `1337`)
+
+Note: if you already have an old `backend/glyco.db`, deleting it will regenerate stable demo IDs on next startup.
+
 ## Frontend Experience
 
 The frontend lives in `frontend/` and is a React 19 + Vite app. The main routes are:

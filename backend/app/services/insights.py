@@ -19,7 +19,7 @@ def _recent_average(logs) -> float | None:
 
 
 def build_glyco_insight(user, risk, monitoring, logs) -> dict:
-    sorted_logs = sorted(logs, key=lambda log: log.log_date)
+    sorted_logs = sorted(logs, key=lambda log: (getattr(log, "created_at", None) or log.log_date, log.log_date))
     avg = _recent_average(sorted_logs)
     risk_level = risk.risk_level if risk else "unknown"
     trend = monitoring.trend_label if monitoring else "unknown"

@@ -1,5 +1,5 @@
 from secrets import token_urlsafe
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
@@ -16,7 +16,7 @@ from app.rules.engine import calculate_bmi
 from app.services.bayesian import get_or_create_bayesian_state, serialize_bayesian_state
 from app.services.assessments import create_monitoring_assessment, create_risk_assessment
 from app.services.care_plan import build_care_plan
-from app.services.forecast_learning import apply_calibration, calibration_snapshot, evaluate_forecasts_for_log, forecast_accuracy_summary
+from app.services.forecast_learning import apply_calibration, calibration_snapshot, evaluate_forecasts_for_log, forecast_accuracy_summary, forecast_personalization_enabled
 from app.services.pdf_service import generate_pdf_report
 from app.reports.generator import build_report
 
@@ -91,10 +91,16 @@ def _forecast_to_response(row: models.GlucoseForecast, db: Session | None = None
         "horizon_minutes": [60, 120, 180, 240],
         "created_at": row.created_at,
         "calibration_applied": False,
+        "personalization_enabled": True,
         "personal_mae_per_horizon": None,
         "forecast_quality": "needs_more_data",
     }
     if db is not None:
+        personalization_enabled = forecast_personalization_enabled(db, row.user_id)
+        response["personalization_enabled"] = personalization_enabled
+        if not personalization_enabled:
+            response["forecast_quality"] = "personalization_off"
+            return response
         snapshot = calibration_snapshot(db, row.user_id, row.model_version)
         personal_mae = {horizon: float(item["mae"]) for horizon, item in snapshot.items()}
         response["personal_mae_per_horizon"] = personal_mae or None
@@ -300,12 +306,18 @@ def bayesian_risk(user_id: int, db: Session = Depends(get_db)):
 @router.post("/logs", response_model=HealthLogOut)
 def create_log(payload: HealthLogIn, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """Create a glucose log and update monitoring and alerts."""
+    reading_time = payload.reading_time or datetime.utcnow()
+    if reading_time.tzinfo is not None:
+        # SQLite stores naive datetimes; keep an absolute UTC instant for matching forecasts.
+        reading_time = reading_time.astimezone(timezone.utc).replace(tzinfo=None)
     row = models.HealthLog(
         user_id=payload.user_id,
-        log_date=date.today(),
+        log_date=reading_time.date(),
         is_fasting=payload.is_fasting,
         fasting_glucose=payload.glucose_level,
         post_meal_glucose=None if payload.is_fasting else payload.glucose_level,
+        # created_at intentionally stores the actual reading time for manual back-entry.
+        created_at=reading_time,
     )
     db.add(row)
     db.commit()
@@ -317,7 +329,7 @@ def create_log(payload: HealthLogIn, background_tasks: BackgroundTasks, db: Sess
 @router.get("/logs/{user_id}", response_model=list[HealthLogOut])
 def get_logs(user_id: int, db: Session = Depends(get_db)):
     """Return all logs for a user in chronological order."""
-    return db.query(models.HealthLog).filter(models.HealthLog.user_id == user_id).order_by(models.HealthLog.log_date.asc(), models.HealthLog.created_at.asc()).all()
+    return db.query(models.HealthLog).filter(models.HealthLog.user_id == user_id).order_by(models.HealthLog.created_at.asc(), models.HealthLog.log_date.asc()).all()
 
 
 @router.post("/monitoring-assessment")
@@ -330,7 +342,7 @@ def monitoring_assessment(user_id: int = 1, db: Session = Depends(get_db)):
 def latest_monitoring(user_id: int, db: Session = Depends(get_db)):
     """Return or refresh the latest monitoring assessment."""
     row = db.query(models.MonitoringAssessment).filter(models.MonitoringAssessment.user_id == user_id).order_by(models.MonitoringAssessment.created_at.desc()).first()
-    latest_log = db.query(models.HealthLog).filter(models.HealthLog.user_id == user_id).order_by(models.HealthLog.log_date.desc()).first()
+    latest_log = db.query(models.HealthLog).filter(models.HealthLog.user_id == user_id).order_by(models.HealthLog.created_at.desc(), models.HealthLog.log_date.desc()).first()
     if row and (row.model_version != "glucose-trend-random-forest-0.2" or (latest_log and latest_log.created_at > row.created_at)):
         return create_monitoring_assessment(db, user_id)
     if not row:
@@ -415,7 +427,7 @@ def create_report(report_type: str, user_id: int = 1, db: Session = Depends(get_
     latest_monitoring(user_id, db)
     risk = db.query(models.RiskAssessment).filter(models.RiskAssessment.user_id == user_id).order_by(models.RiskAssessment.created_at.desc()).first()
     monitoring = db.query(models.MonitoringAssessment).filter(models.MonitoringAssessment.user_id == user_id).order_by(models.MonitoringAssessment.created_at.desc()).first()
-    logs = db.query(models.HealthLog).filter(models.HealthLog.user_id == user_id).order_by(models.HealthLog.log_date.asc()).all()
+    logs = db.query(models.HealthLog).filter(models.HealthLog.user_id == user_id).order_by(models.HealthLog.created_at.asc(), models.HealthLog.log_date.asc()).all()
     content = build_report(report_type, user, risk, monitoring, logs)
     row = models.Report(user_id=user_id, report_type=report_type, content_json=content)
     db.add(row)
@@ -677,7 +689,7 @@ def read_family_share(share_token: str, db: Session = Depends(get_db)):
     if not share:
         raise HTTPException(404, "Share not found")
     user = db.get(models.User, share.user_id)
-    logs = db.query(models.HealthLog).filter(models.HealthLog.user_id == share.user_id).order_by(models.HealthLog.log_date.asc()).all()
+    logs = db.query(models.HealthLog).filter(models.HealthLog.user_id == share.user_id).order_by(models.HealthLog.created_at.asc(), models.HealthLog.log_date.asc()).all()
     monitoring = latest_monitoring(share.user_id, db)
     risk = latest_risk(share.user_id, db)
     serialized_logs = [HealthLogOut.model_validate(log) for log in logs]

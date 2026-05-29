@@ -154,7 +154,7 @@ def generate_pdf_report(db: Session, report_id: int) -> Path:
     if not report:
         raise ValueError("Report not found")
     user = db.get(models.User, report.user_id)
-    logs = db.query(models.HealthLog).filter(models.HealthLog.user_id == report.user_id).order_by(models.HealthLog.log_date.asc()).all()
+    logs = db.query(models.HealthLog).filter(models.HealthLog.user_id == report.user_id).order_by(models.HealthLog.created_at.asc(), models.HealthLog.log_date.asc()).all()
     recent_logs = logs[-7:]
     latest_log = recent_logs[-1] if recent_logs else None
     fasting_values = [log.glucose_level for log in recent_logs if log.glucose_level is not None and getattr(log, "is_fasting", True)]
