@@ -254,6 +254,20 @@ export type CarePlan = {
     avg_post_meal?: number | null;
     bayesian_posterior?: number;
     top_recommendation_type?: string;
+    profile_height_cm?: number | null;
+    profile_weight_kg?: number | null;
+    profile_bmi?: number | null;
+    daily_calorie_target?: number | null;
+    calorie_strategy?: string | null;
+    sample_day_calories?: number | null;
+    forecast_source?: string | null;
+    forecast_model_version?: string | null;
+    forecast_trend_direction?: string | null;
+    forecast_60_mg_dl?: number | null;
+    forecast_current_mg_dl?: number | null;
+    forecast_meal_strategy?: string | null;
+    predicted_low_alert?: boolean | null;
+    predicted_high_alert?: boolean | null;
   };
 };
 

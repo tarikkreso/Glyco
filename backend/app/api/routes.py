@@ -269,6 +269,7 @@ def update_profile(profile_id: int, payload: ProfileIn, db: Session = Depends(ge
     for key, value in payload.model_dump().items():
         setattr(row, key, value)
     row.bmi = calculate_bmi(payload.weight_kg, payload.height_cm)
+    row.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(row)
     return row
@@ -653,6 +654,39 @@ def diet_plan(user_id: int = 1, force_refresh: bool = False, db: Session = Depen
             .order_by(models.Report.created_at.desc())
             .first()
         )
+        if cached:
+            latest_log = (
+                db.query(models.HealthLog)
+                .filter(models.HealthLog.user_id == user_id)
+                .order_by(models.HealthLog.created_at.desc(), models.HealthLog.log_date.desc())
+                .first()
+            )
+            latest_profile = (
+                db.query(models.Profile)
+                .filter(models.Profile.user_id == user_id)
+                .order_by(models.Profile.updated_at.desc(), models.Profile.created_at.desc())
+                .first()
+            )
+            latest_forecast = (
+                db.query(models.GlucoseForecast)
+                .filter(models.GlucoseForecast.user_id == user_id)
+                .order_by(models.GlucoseForecast.created_at.desc())
+                .first()
+            )
+            latest_input_time = max(
+                [
+                    value
+                    for value in [
+                        latest_log.created_at if latest_log else None,
+                        latest_profile.updated_at if latest_profile else None,
+                        latest_forecast.created_at if latest_forecast else None,
+                    ]
+                    if value is not None
+                ],
+                default=None,
+            )
+            if latest_input_time is not None and cached.created_at < latest_input_time:
+                cached = None
         if cached:
             return cached.content_json
 

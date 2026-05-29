@@ -131,6 +131,8 @@ export function CarePlan() {
     ? new Date(plan.dataUpdatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
     : "not generated";
   const latestReading = signals?.latest_glucose ? `${signals.latest_glucose} mg/dL` : "-";
+  const forecast60 = signals?.forecast_60_mg_dl ? `${signals.forecast_60_mg_dl} mg/dL` : "-";
+  const calorieTarget = signals?.daily_calorie_target ? `${signals.daily_calorie_target} kcal` : "-";
   const source = sourceLabel(plan.data?.source);
 
   return (
@@ -224,6 +226,8 @@ export function CarePlan() {
               <div><span>{t("carePlan.avgFasting")}</span><strong>{signals?.avg_fasting ? `${signals.avg_fasting} mg/dL` : "-"}</strong><small>{bs ? "nedavni zapisi" : "recent logs"}</small></div>
               <div><span>{t("carePlan.avgPostMeal")}</span><strong>{signals?.avg_post_meal ? `${signals.avg_post_meal} mg/dL` : "-"}</strong><small>{bs ? "nedavni zapisi" : "recent logs"}</small></div>
               <div><span>{t("carePlan.learnedFocus")}</span><strong>{signals?.top_recommendation_type ?? "-"}</strong><small>{t("carePlan.thompsonRanker")}</small></div>
+              <div><span>{bs ? "Prognoza za 60 min" : "60 min forecast"}</span><strong>{forecast60}</strong><small>{signals?.forecast_trend_direction ?? "-"}</small></div>
+              <div><span>{bs ? "Kalorijski cilj" : "Calorie target"}</span><strong>{calorieTarget}</strong><small>{signals?.sample_day_calories ? `${signals.sample_day_calories} kcal ${bs ? "u planu" : "in plan"}` : "-"}</small></div>
             </div>
             <p className="care-plan-safety"><ShieldCheck size={16} /> {t("carePlan.safetyNote")}</p>
           </section>

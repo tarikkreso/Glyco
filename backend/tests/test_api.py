@@ -1,6 +1,6 @@
 import sys
 import unittest
-from datetime import date
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -423,6 +423,138 @@ class GlycoApiTests(unittest.TestCase):
             if user is not None:
                 db.query(models.AgentAlert).filter(models.AgentAlert.user_id == user.id).delete()
                 db.query(models.Report).filter(models.Report.user_id == user.id).delete()
+                db.query(models.MonitoringAssessment).filter(models.MonitoringAssessment.user_id == user.id).delete()
+                db.query(models.RiskAssessment).filter(models.RiskAssessment.user_id == user.id).delete()
+                db.query(models.BayesianRiskState).filter(models.BayesianRiskState.user_id == user.id).delete()
+                db.query(models.BanditArmState).filter(models.BanditArmState.user_id == user.id).delete()
+                db.query(models.HealthLog).filter(models.HealthLog.user_id == user.id).delete()
+                db.query(models.Profile).filter(models.Profile.user_id == user.id).delete()
+                db.query(models.User).filter(models.User.id == user.id).delete()
+                db.commit()
+            db.close()
+
+    def test_care_plan_uses_forecast_profile_and_varied_meals(self) -> None:
+        db = SessionLocal()
+        user = None
+        try:
+            user = models.User(full_name="Care Plan Forecast", email_or_demo_id="care-plan-forecast")
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+            db.add(models.Profile(
+                user_id=user.id,
+                age=58,
+                sex="Male",
+                height_cm=178,
+                weight_kg=104,
+                bmi=calculate_bmi(104, 178),
+                high_bp=True,
+                high_chol=True,
+                smoker=False,
+                phys_activity=False,
+                fruits=True,
+                veggies=True,
+                general_health=3,
+                stroke_history=False,
+                heart_disease_history=False,
+                difficulty_walking=False,
+                family_history_diabetes=True,
+            ))
+            now = datetime.utcnow().replace(microsecond=0)
+            for idx, value in enumerate([142, 156, 171, 184]):
+                db.add(models.HealthLog(user_id=user.id, log_date=date.today(), is_fasting=False, fasting_glucose=value, post_meal_glucose=value, created_at=now + timedelta(minutes=idx)))
+            db.commit()
+            db.add(models.GlucoseForecast(
+                user_id=user.id,
+                created_at=now + timedelta(minutes=5),
+                current_glucose=10.2,
+                prediction_60min=11.0,
+                prediction_120min=11.3,
+                prediction_180min=10.8,
+                prediction_240min=10.1,
+                ci_60_low=10.0,
+                ci_60_high=12.0,
+                ci_120_low=10.1,
+                ci_120_high=12.5,
+                ci_180_low=9.7,
+                ci_180_high=11.8,
+                ci_240_low=9.0,
+                ci_240_high=11.0,
+                trend_direction="rising",
+                predicted_low_alert=False,
+                predicted_high_alert=True,
+                recommendation="High forecast test.",
+                model_version="test-forecast",
+                used_fallback=False,
+            ))
+            db.commit()
+
+            plan = self.client.post(f"/api/care-plan/diet?user_id={user.id}&force_refresh=True").json()
+            self.assertEqual(plan["signals"]["forecast_60_mg_dl"], 198)
+            self.assertEqual(plan["signals"]["forecast_meal_strategy"], "rising_or_high")
+            self.assertEqual(plan["signals"]["profile_height_cm"], 178)
+            self.assertEqual(plan["signals"]["profile_weight_kg"], 104)
+            self.assertIsNotNone(plan["signals"]["daily_calorie_target"])
+            self.assertIsNotNone(plan["signals"]["sample_day_calories"])
+            self.assertEqual(len(plan["sample_day"]), 4)
+            self.assertNotIn("Spinach and Mushroom Scrambled Eggs", "\n".join(plan["sample_day"]))
+        finally:
+            if user is not None:
+                db.query(models.Report).filter(models.Report.user_id == user.id).delete()
+                db.query(models.GlucoseForecast).filter(models.GlucoseForecast.user_id == user.id).delete()
+                db.query(models.MonitoringAssessment).filter(models.MonitoringAssessment.user_id == user.id).delete()
+                db.query(models.RiskAssessment).filter(models.RiskAssessment.user_id == user.id).delete()
+                db.query(models.BayesianRiskState).filter(models.BayesianRiskState.user_id == user.id).delete()
+                db.query(models.BanditArmState).filter(models.BanditArmState.user_id == user.id).delete()
+                db.query(models.HealthLog).filter(models.HealthLog.user_id == user.id).delete()
+                db.query(models.Profile).filter(models.Profile.user_id == user.id).delete()
+                db.query(models.User).filter(models.User.id == user.id).delete()
+                db.commit()
+            db.close()
+
+    def test_care_plan_cache_expires_when_new_glucose_log_arrives(self) -> None:
+        db = SessionLocal()
+        user = None
+        try:
+            user = models.User(full_name="Care Plan Cache", email_or_demo_id="care-plan-cache")
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+            db.add(models.Profile(
+                user_id=user.id,
+                age=48,
+                sex="Female",
+                height_cm=164,
+                weight_kg=74,
+                bmi=calculate_bmi(74, 164),
+                high_bp=False,
+                high_chol=False,
+                smoker=False,
+                phys_activity=True,
+                fruits=True,
+                veggies=True,
+                general_health=2,
+                stroke_history=False,
+                heart_disease_history=False,
+                difficulty_walking=False,
+                family_history_diabetes=False,
+            ))
+            first_time = datetime.utcnow().replace(microsecond=0) - timedelta(minutes=10)
+            db.add(models.HealthLog(user_id=user.id, log_date=date.today(), is_fasting=True, fasting_glucose=111, created_at=first_time))
+            db.commit()
+
+            first_plan = self.client.post(f"/api/care-plan/diet?user_id={user.id}&force_refresh=False").json()
+            self.assertEqual(first_plan["signals"]["latest_glucose"], 111)
+
+            db.add(models.HealthLog(user_id=user.id, log_date=date.today(), is_fasting=False, fasting_glucose=181, post_meal_glucose=181, created_at=datetime.utcnow() + timedelta(seconds=1)))
+            db.commit()
+            second_plan = self.client.post(f"/api/care-plan/diet?user_id={user.id}&force_refresh=False").json()
+            self.assertEqual(second_plan["signals"]["latest_glucose"], 181)
+            self.assertFalse(second_plan["signals"]["latest_is_fasting"])
+        finally:
+            if user is not None:
+                db.query(models.Report).filter(models.Report.user_id == user.id).delete()
+                db.query(models.GlucoseForecast).filter(models.GlucoseForecast.user_id == user.id).delete()
                 db.query(models.MonitoringAssessment).filter(models.MonitoringAssessment.user_id == user.id).delete()
                 db.query(models.RiskAssessment).filter(models.RiskAssessment.user_id == user.id).delete()
                 db.query(models.BayesianRiskState).filter(models.BayesianRiskState.user_id == user.id).delete()
