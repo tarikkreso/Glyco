@@ -212,8 +212,9 @@ def main() -> None:
     baseline.fit(x_train, y_train)
     baseline_accuracy = float(baseline.score(x_test, y_test))
 
+    watch_weight_multiplier = 5.0
     sample_weights = compute_sample_weight("balanced", y_train)
-    sample_weights[y_train.eq("watch")] *= 3.0
+    sample_weights[y_train.eq("watch")] *= watch_weight_multiplier
     model = RandomForestClassifier(
         n_estimators=400,
         random_state=42,
@@ -234,11 +235,11 @@ def main() -> None:
         "baseline_accuracy": baseline_accuracy,
         "classification_report": classification_report(y_test, predictions, output_dict=True),
         "confusion_matrix": confusion_matrix(y_test, predictions, labels=["stable", "watch", "concerning"]).tolist(),
-        "model_version": "glucose-trend-random-forest-0.2",
+        "model_version": "glucose-trend-random-forest-0.3",
         "split_strategy": "prepared patient-wise split with glucose-only weighted training" if prepared_split else split_strategy,
         "patient_overlap": patient_overlap,
         "feature_contract": "glucose-only patient app inputs",
-        "watch_weight_multiplier": 3.0,
+        "watch_weight_multiplier": watch_weight_multiplier,
     }
 
     joblib.dump(model, ARTIFACTS / "trend_model.joblib")

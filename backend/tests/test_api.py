@@ -27,21 +27,21 @@ class GlycoApiTests(unittest.TestCase):
         trend = _load_trend_bundle()
         self.assertIn("features", risk["preprocessor"])
         self.assertIn("features", trend["preprocessor"])
-        self.assertEqual(risk["metadata"]["model_version"], "random-forest-0.2")
-        self.assertEqual(trend["metadata"]["model_version"], "glucose-trend-random-forest-0.2")
+        self.assertEqual(risk["metadata"]["model_version"], "hist-gradient-boosting-risk-0.3")
+        self.assertEqual(trend["metadata"]["model_version"], "glucose-trend-random-forest-0.3")
 
     def test_seeded_demo_users_cover_high_and_low_risk(self) -> None:
         monitoring_user = self.client.get("/api/risk-assessment/1/latest").json()
         high_user = self.client.get("/api/risk-assessment/2/latest").json()
         low_user = self.client.get("/api/risk-assessment/3/latest").json()
-        self.assertEqual(monitoring_user["model_version"], "random-forest-0.2")
+        self.assertEqual(monitoring_user["model_version"], "hist-gradient-boosting-risk-0.3")
         self.assertEqual(monitoring_user["risk_level"], "high")
         self.assertEqual(high_user["risk_level"], "high")
         self.assertEqual(low_user["risk_level"], "low")
 
     def test_seeded_monitoring_user_is_model_backed(self) -> None:
         monitoring = self.client.get("/api/monitoring-assessment/1/latest").json()
-        self.assertEqual(monitoring["model_version"], "glucose-trend-random-forest-0.2")
+        self.assertEqual(monitoring["model_version"], "glucose-trend-random-forest-0.3")
         self.assertIn(monitoring["trend_label"], {"watch", "concerning"})
 
     def test_insufficient_history_falls_back_cleanly(self) -> None:
@@ -177,8 +177,8 @@ class GlycoApiTests(unittest.TestCase):
     def test_report_generation_uses_model_backed_language(self) -> None:
         report = self.client.post("/api/reports/doctor?user_id=1").json()
         bodies = [section["body"] for section in report["content"]["sections"]]
-        self.assertTrue(any("random-forest-0.2" in body for body in bodies))
-        self.assertTrue(any("glucose-trend-random-forest-0.2" in body or "concerning" in body for body in bodies))
+        self.assertTrue(any("hist-gradient-boosting-risk-0.3" in body for body in bodies))
+        self.assertTrue(any("glucose-trend-random-forest-0.3" in body or "concerning" in body for body in bodies))
 
     def test_glyco_insight_contains_agent_sections(self) -> None:
         insight = self.client.get("/api/insights/1").json()
@@ -195,7 +195,7 @@ class GlycoApiTests(unittest.TestCase):
         mock_client = MagicMock()
         mock_client.provider_name = "fallback"
         mock_client.model_name = "fallback"
-        mock_client.generate.return_value = "This is a local response containing glucose trend model, RF risk model, and Bayesian layer."
+        mock_client.generate.return_value = "This is a local response containing glucose trend model, trained risk model, and Bayesian layer."
         
         with patch("app.agent.agent_service.get_llm_client", return_value=mock_client):
             response = self.client.post("/api/agent/chat", json={"user_id": 1, "message": "Trebam li se brinuti ovaj tjedan?"}).json()
@@ -214,11 +214,11 @@ class GlycoApiTests(unittest.TestCase):
         risk_tool = next(tool for tool in response["tool_calls"] if tool["name"] == "run_trained_risk_model")
         trend_tool = next(tool for tool in response["tool_calls"] if tool["name"] == "run_trained_glucose_trend_model")
         bayesian_tool = next(tool for tool in response["tool_calls"] if tool["name"] == "get_bayesian_risk_state")
-        self.assertEqual(risk_tool["model_version"], "random-forest-0.2")
-        self.assertEqual(trend_tool["model_version"], "glucose-trend-random-forest-0.2")
+        self.assertEqual(risk_tool["model_version"], "hist-gradient-boosting-risk-0.3")
+        self.assertEqual(trend_tool["model_version"], "glucose-trend-random-forest-0.3")
         self.assertIn("posterior", bayesian_tool["result_summary"])
         self.assertIn("glucose trend model", response["answer"])
-        self.assertIn("RF risk model", response["answer"])
+        self.assertIn("trained risk model", response["answer"])
         self.assertIn("Bayesian layer", response["answer"])
         self.assertGreaterEqual(len(response["guideline_snippets"]), 1)
         self.assertIn("learning_summary", response)
@@ -380,8 +380,8 @@ class GlycoApiTests(unittest.TestCase):
         plan = self.client.post("/api/care-plan/diet?user_id=1&force_refresh=True").json()
         self.assertTrue(any(s in plan["source"] for s in {"fallback", "gemini", "deepseek", "liquid"}))
         self.assertIn("signals", plan)
-        self.assertEqual(plan["signals"]["risk_model_version"], "random-forest-0.2")
-        self.assertEqual(plan["signals"]["trend_model_version"], "glucose-trend-random-forest-0.2")
+        self.assertEqual(plan["signals"]["risk_model_version"], "hist-gradient-boosting-risk-0.3")
+        self.assertEqual(plan["signals"]["trend_model_version"], "glucose-trend-random-forest-0.3")
         self.assertIsNotNone(plan["signals"]["latest_glucose"])
         combined = " ".join(plan["weekly_recommendations"] + [plan["direction"]])
         self.assertTrue(str(int(plan["signals"]["latest_glucose"])) in combined or plan["signals"]["trend_label"] in combined)

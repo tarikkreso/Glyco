@@ -5,6 +5,7 @@ import { api } from "../api/client";
 import { useAuth } from "../auth/auth";
 import { Card, ErrorState, LoadingState, PageHeader } from "../components/ui";
 import { useI18n } from "../i18n";
+import { useGlucoseUnit } from "../utils/glucoseUnits";
 
 type ProfileSettingsValues = {
   fullName: string;
@@ -38,10 +39,11 @@ const fallbackProfile: Omit<ProfileSettingsValues, "fullName" | "email"> = {
 
 export function ProfileSettings() {
   const auth = useAuth();
-  const { language } = useI18n();
+  const { language, t } = useI18n();
   const userId = auth.session?.userId ?? 1;
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const { unit, setUnit } = useGlucoseUnit();
   const bs = language === "bs";
 
   const profileQuery = useQuery({
@@ -131,6 +133,7 @@ export function ProfileSettings() {
           <label>{bs ? "Biološki spol" : "Biological sex"}<select {...register("sex")}><option>{bs ? "Ženski" : "Female"}</option><option>{bs ? "Muški" : "Male"}</option></select></label>
           <label>{bs ? "Težina (kg)" : "Weight (kg)"}<input type="number" step="0.1" {...register("weight_kg", { valueAsNumber: true })} /></label>
           <label>{bs ? "Visina (cm)" : "Height (cm)"}<input type="number" step="0.1" {...register("height_cm", { valueAsNumber: true })} /></label>
+          <label>{t("settings.glucoseUnit")}<select value={unit} onChange={(event) => setUnit(event.target.value === "mgdl" ? "mgdl" : "mmol")}><option value="mmol">mmol/L</option><option value="mgdl">mg/dL</option></select><small>{t("settings.glucoseUnitHelp")}</small></label>
           <label>{bs ? "Opšte zdravlje" : "General health"}<select {...register("general_health", { valueAsNumber: true })}><option value={1}>{bs ? "Odlično" : "Excellent"}</option><option value={2}>{bs ? "Vrlo dobro" : "Very good"}</option><option value={3}>{bs ? "Dobro" : "Good"}</option><option value={4}>{bs ? "Zadovoljavajuće" : "Fair"}</option><option value={5}>{bs ? "Loše" : "Poor"}</option></select></label>
           <div className="span-2 check-grid">
             <label className="check"><input type="checkbox" {...register("high_bp")} /> {bs ? "Visok krvni pritisak" : "High blood pressure"}</label>

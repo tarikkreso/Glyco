@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import { api } from "../api/client";
 import { Card, LoadingState, PageHeader, Badge } from "../components/ui";
+import { formatGlucoseFromMgdl, mgdlToMmol, useGlucoseUnit } from "../utils/glucoseUnits";
 
 function RiskBar({ value }: { value: number }) {
   const pct = Math.round(value * 100);
@@ -61,6 +62,7 @@ function AlertItem({ flag }: { flag: any }) {
 export function FamilyView({ isPublic = false }: { isPublic?: boolean }) {
   const { token } = useParams<{ token?: string }>();
   const queryClient = useQueryClient();
+  const { unit } = useGlucoseUnit();
 
   // State to track custom active token for patient's dashboard view
   const [activeToken, setActiveToken] = useState<string>(token || "demo-family-sarah");
@@ -270,18 +272,18 @@ export function FamilyView({ isPublic = false }: { isPublic?: boolean }) {
             {[
               {
                 title: "Avg fasting glucose",
-                value: computedStats.avgFasting,
+                value: computedStats.avgFasting ? (unit === "mgdl" ? computedStats.avgFasting : Number(mgdlToMmol(computedStats.avgFasting).toFixed(1))) : null,
                 color: computedStats.avgFasting && computedStats.avgFasting > 125 ? "var(--error)" : "var(--primary)",
                 isError: computedStats.avgFasting && computedStats.avgFasting > 125,
-                sub: computedStats.avgFasting ? `≈ ${(computedStats.avgFasting / 18).toFixed(1)} mmol/L` : null,
+                sub: computedStats.avgFasting ? formatGlucoseFromMgdl(computedStats.avgFasting, unit) : null,
                 footer: "Optimal target is <= 130"
               },
               {
                 title: "Avg post-meal glucose",
-                value: computedStats.avgPostMeal,
+                value: computedStats.avgPostMeal ? (unit === "mgdl" ? computedStats.avgPostMeal : Number(mgdlToMmol(computedStats.avgPostMeal).toFixed(1))) : null,
                 color: computedStats.avgPostMeal && computedStats.avgPostMeal > 140 ? "#d97706" : "var(--primary)",
                 isError: computedStats.avgPostMeal && computedStats.avgPostMeal > 140,
-                sub: computedStats.avgPostMeal ? `≈ ${(computedStats.avgPostMeal / 18).toFixed(1)} mmol/L` : null,
+                sub: computedStats.avgPostMeal ? formatGlucoseFromMgdl(computedStats.avgPostMeal, unit) : null,
                 footer: "Optimal target is <= 140"
               },
               {
@@ -326,7 +328,7 @@ export function FamilyView({ isPublic = false }: { isPublic?: boolean }) {
                   <strong style={{ font: "800 26px/1 Manrope, Inter, sans-serif", color: stat.color }}>
                     {stat.value ?? "--"}
                   </strong>
-                  {stat.value && i < 2 && <span style={{ color: "var(--muted)", fontSize: 11, fontWeight: 600 }}>mg/dL</span>}
+                  {stat.value && i < 2 && <span style={{ color: "var(--muted)", fontSize: 11, fontWeight: 600 }}>{unit === "mgdl" ? "mg/dL" : "mmol/L"}</span>}
                 </div>
                 {stat.sub && (
                   <span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600 }}>
@@ -390,11 +392,11 @@ export function FamilyView({ isPublic = false }: { isPublic?: boolean }) {
                           }} />
                         </td>
                         <td style={{ padding: "10px 14px", fontWeight: 700, color: "var(--text)", whiteSpace: "nowrap" }}>
-                          <span style={{ fontSize: 14 }}>{glucose}</span>
-                          <span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 500, marginLeft: 4 }}>mg/dL</span>
+                          <span style={{ fontSize: 14 }}>{unit === "mgdl" ? Math.round(glucose) : mgdlToMmol(glucose).toFixed(1)}</span>
+                          <span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 500, marginLeft: 4 }}>{unit === "mgdl" ? "mg/dL" : "mmol/L"}</span>
                           <span style={{ margin: "0 6px", color: "var(--outline)", fontSize: 11 }}>|</span>
                           <span style={{ fontSize: 12, color: "var(--muted)", fontWeight: 500 }}>
-                            {(glucose / 18).toFixed(1)} <span style={{ fontSize: 10 }}>mmol/L</span>
+                            {unit === "mgdl" ? mgdlToMmol(glucose).toFixed(1) : Math.round(glucose)} <span style={{ fontSize: 10 }}>{unit === "mgdl" ? "mmol/L" : "mg/dL"}</span>
                           </span>
                         </td>
                         <td style={{ padding: "10px 14px", verticalAlign: "middle" }}>

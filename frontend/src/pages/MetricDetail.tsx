@@ -6,6 +6,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { api } from "../api/client";
 import { useAuth } from "../auth/auth";
 import { Badge, Card, EmptyState, LoadingState, PageHeader } from "../components/ui";
+import { formatGlucoseFromMgdl, useGlucoseUnit } from "../utils/glucoseUnits";
 
 const metricCopy: Record<string, { title: string; plain: string; icon: typeof TrendingUp }> = {
   glucose: {
@@ -51,6 +52,7 @@ function formatPercent(value?: number) {
 
 export function MetricDetail() {
   const { t } = useI18n();
+  const { unit } = useGlucoseUnit();
   const auth = useAuth();
   const userId = auth.session?.userId ?? 1;
   const navigate = useNavigate();
@@ -68,10 +70,9 @@ export function MetricDetail() {
   const values = useMemo(() => (logs.data ?? []).slice(-8).map((log) => log.glucose_level), [logs.data]);
   const average = values.length ? Math.round(values.reduce((sum, value) => sum + value, 0) / values.length) : undefined;
   const thompsonAction = insight.data?.learning_summary?.next_best_action;
-  const riskSource = risk.data?.model_version === "random-forest-0.2" ? "trained RF risk model" : "risk fallback scorer";
-  const trendSource = monitoring.data?.model_version === "glucose-trend-random-forest-0.2" ? "trained glucose trend model" : "monitoring fallback scorer";
+  const trendSource = monitoring.data?.model_version === "glucose-trend-random-forest-0.3" ? "trained glucose trend model" : "monitoring fallback scorer";
   const primaryValue = {
-    glucose: latestLog ? `${latestLog.glucose_level} mg/dL` : "-",
+    glucose: formatGlucoseFromMgdl(latestLog?.glucose_level, unit),
     nutrition: thompsonAction?.type ?? (risk.data?.risk_level === "high" ? "watch" : "steady"),
     hba1c: "6.5%",
     risk: risk.data?.risk_level ?? "-",
@@ -97,13 +98,13 @@ export function MetricDetail() {
           <ul className="explain-list">
             <li>{t("metric.whyA")}</li>
             <li>{t("metric.whyB")} {t(trendSource === "trained glucose trend model" ? "metric.trendModel" : "metric.trendModel")} {t("metric.whyPattern")} <strong>{monitoring.data?.trend_label ?? t("common.unknown")}</strong>.</li>
-            <li>{t("metric.whyC")} {t(riskSource === "trained RF risk model" ? "metric.rfRiskModel" : "metric.rfRiskModel")} {t("metric.whyRisk")} <strong>{risk.data?.risk_level ?? t("common.unknown")}</strong>.</li>
+            <li>{t("metric.whyC")} {t("metric.riskModel")} {t("metric.whyRisk")} <strong>{risk.data?.risk_level ?? t("common.unknown")}</strong>.</li>
           </ul>
         </Card>
         <Card title={t("metric.whatUses")}>
           <div className="model-evidence-list">
-            <div><span>{t("metric.recentAverage")}</span><strong>{average ? `${average} mg/dL` : "-"}</strong></div>
-            <div><span>{t("metric.rfRiskModel")}</span><strong>{risk.data?.model_version ?? t("common.loading")}</strong></div>
+            <div><span>{t("metric.recentAverage")}</span><strong>{formatGlucoseFromMgdl(average, unit)}</strong></div>
+            <div><span>{t("metric.riskModel")}</span><strong>{risk.data?.model_version ?? t("common.loading")}</strong></div>
             <div><span>{t("metric.trendModel")}</span><strong>{monitoring.data?.model_version ?? t("common.loading")}</strong></div>
             <div><span>{t("metric.bayesianPosterior")}</span><strong>{formatPercent(bayesian.data?.posterior_mean)}</strong></div>
           </div>

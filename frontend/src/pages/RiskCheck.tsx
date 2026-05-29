@@ -215,7 +215,7 @@ export function RiskCheckFlow({
                 {variant === "app" && (
                   <Card title={bs ? "Prijedlog kliničkog protokola" : "Clinical Protocol Suggestion"}>
                     <p>{result?.next_actions[0] ?? (bs ? "Uspostavite dosljedno praćenje životnih navika i razmotrite pregled kliničara ako povišeni indikatori potraju." : "Initiate consistent lifestyle tracking and consider clinician review if elevated indicators persist.")}</p>
-                    <button className="secondary">{bs ? "Dodaj u plan njege" : "Add to Care Plan"}</button>
+                    <button className="secondary">{bs ? "Dodaj u ishranu" : "Add to Nutrition"}</button>
                   </Card>
                 )}
 

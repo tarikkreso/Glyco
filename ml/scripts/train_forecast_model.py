@@ -39,17 +39,18 @@ def _patient_split(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, list[s
 def _model() -> LGBMRegressor:
     """Create the configured LightGBM regressor for every forecast horizon."""
     return LGBMRegressor(
-        n_estimators=500,
-        learning_rate=0.05,
-        max_depth=6,
-        num_leaves=31,
-        min_child_samples=5,
-        subsample=0.8,
-        colsample_bytree=0.8,
-        reg_alpha=0.1,
-        reg_lambda=0.1,
+        n_estimators=300,
+        learning_rate=0.04,
+        max_depth=3,
+        num_leaves=7,
+        min_child_samples=40,
+        subsample=0.9,
+        colsample_bytree=0.9,
+        reg_alpha=0.4,
+        reg_lambda=0.8,
         random_state=RANDOM_STATE,
         n_jobs=-1,
+        verbose=-1,
     )
 
 
@@ -58,6 +59,33 @@ def _top_gain_features(model: LGBMRegressor, feature_columns: list[str]) -> list
     gains = model.booster_.feature_importance(importance_type="gain")
     ranked = sorted(zip(feature_columns, gains), key=lambda item: float(item[1]), reverse=True)
     return [(name, float(gain)) for name, gain in ranked[:10]]
+
+
+def _strategy_predictions(frame: pd.DataFrame, strategy: str) -> pd.Series:
+    """Return baseline forecast predictions from already-built feature rows."""
+    current = frame["glucose_current"]
+    if strategy == "persistence":
+        return current
+    if strategy == "last_delta":
+        return current + (current - frame["lag_1"])
+    if strategy == "half_delta":
+        return current + 0.5 * (current - frame["lag_1"])
+    if strategy == "rolling_mean_6":
+        return frame["roll_mean_6"]
+    raise ValueError(f"Unknown forecast strategy: {strategy}")
+
+
+def _regression_metrics(y_true: pd.Series, y_pred) -> dict[str, float]:
+    """Compute the standard forecast metrics used across model and baselines."""
+    y_pred_series = pd.Series(y_pred, index=y_true.index)
+    valid = np.isfinite(y_true) & np.isfinite(y_pred_series)
+    if not bool(valid.any()):
+        raise ValueError("Cannot compute forecast metrics without finite prediction pairs.")
+    return {
+        "mae": float(mean_absolute_error(y_true[valid], y_pred_series[valid])),
+        "rmse": float(np.sqrt(mean_squared_error(y_true[valid], y_pred_series[valid]))),
+        "r2": float(r2_score(y_true[valid], y_pred_series[valid])),
+    }
 
 
 def train_forecast_models() -> dict[str, object]:
@@ -73,6 +101,9 @@ def train_forecast_models() -> dict[str, object]:
     mae_per_horizon: dict[str, float] = {}
     rmse_per_horizon: dict[str, float] = {}
     r2_per_horizon: dict[str, float] = {}
+    model_metrics_per_horizon: dict[str, dict[str, float]] = {}
+    baseline_metrics_per_horizon: dict[str, dict[str, dict[str, float]]] = {}
+    deployment_strategy_per_horizon: dict[str, str] = {}
     for horizon in HORIZONS:
         target = f"target_{horizon}min"
         if target not in target_columns:
@@ -84,20 +115,31 @@ def train_forecast_models() -> dict[str, object]:
         y_test = test_df[target]
         model.fit(x_train, y_train)
         predictions = model.predict(x_test)
-        mae = float(mean_absolute_error(y_test, predictions))
-        rmse = float(np.sqrt(mean_squared_error(y_test, predictions)))
-        r2 = float(r2_score(y_test, predictions))
+        model_metrics = _regression_metrics(y_test, predictions)
+        baselines = {
+            strategy: _regression_metrics(y_test, _strategy_predictions(test_df, strategy))
+            for strategy in ("persistence", "last_delta", "half_delta", "rolling_mean_6")
+        }
+        candidates = {"lgbm": model_metrics, **baselines}
+        selected_strategy, selected_metrics = min(candidates.items(), key=lambda item: item[1]["mae"])
+        mae = selected_metrics["mae"]
+        rmse = selected_metrics["rmse"]
+        r2 = selected_metrics["r2"]
         mae_per_horizon[str(horizon)] = mae
         rmse_per_horizon[str(horizon)] = rmse
         r2_per_horizon[str(horizon)] = r2
+        model_metrics_per_horizon[str(horizon)] = model_metrics
+        baseline_metrics_per_horizon[str(horizon)] = baselines
+        deployment_strategy_per_horizon[str(horizon)] = selected_strategy
         print(f"{horizon} min MAE={mae:.3f} RMSE={rmse:.3f} R2={r2:.3f}")
+        print(f"Selected deployment strategy for {horizon} min: {selected_strategy}")
         print(f"Top 10 gain features for {horizon} min:")
         for name, gain in _top_gain_features(model, feature_columns):
             print(f"  {name}: {gain:.2f}")
         joblib.dump(model, ARTIFACTS_DIR / f"forecast_model_{horizon}min.pkl")
 
     metadata = {
-        "model_version": "lgbm-forecast-0.2",
+        "model_version": "hybrid-lgbm-baseline-forecast-0.3",
         "feature_columns": feature_columns,
         "target_columns": target_columns,
         "shift_steps": feature_metadata["shift_steps"],
@@ -106,6 +148,9 @@ def train_forecast_models() -> dict[str, object]:
         "mae_per_horizon": mae_per_horizon,
         "rmse_per_horizon": rmse_per_horizon,
         "r2_per_horizon": r2_per_horizon,
+        "model_metrics_per_horizon": model_metrics_per_horizon,
+        "baseline_metrics_per_horizon": baseline_metrics_per_horizon,
+        "deployment_strategy_per_horizon": deployment_strategy_per_horizon,
         "trained_on_patients": train_patients,
         "tested_on_patients": test_patients,
         "training_date": datetime.now(UTC).isoformat(),

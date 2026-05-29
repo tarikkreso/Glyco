@@ -4,9 +4,10 @@ import { useMemo, useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { useAuth } from "../auth/auth";
-import { Badge, ErrorState, LoadingState } from "../components/ui";
+import { Badge, ErrorState, FactorList, LoadingState } from "../components/ui";
 import { useI18n } from "../i18n";
 import { appendAgentAssistantMessage, appendAgentUserMessage, setAgentDraft, useAgentChatSession } from "../state/agentChatSession";
+import { formatGlucoseFromMgdl, useGlucoseUnit } from "../utils/glucoseUnits";
 
 type Feeling = "good" | "low" | "elevated" | "no-data";
 
@@ -66,13 +67,28 @@ function localizeThompsonAction(title?: string, bs?: boolean) {
 }
 
 function GlycoAvatar({ state }: { state: string }) {
+  const clipPathVal = useMemo(() => {
+    const points = [];
+    for (let i = 0; i < 60; i++) {
+      const angle = (i * 2 * Math.PI) / 60;
+      const r = 0.445 + 0.045 * Math.cos(5 * angle);
+      const x = (50 + r * 100 * Math.sin(angle)).toFixed(2);
+      const y = (50 - r * 100 * Math.cos(angle)).toFixed(2);
+      points.push(`${x}% ${y}%`);
+    }
+    return `polygon(${points.join(", ")})`;
+  }, []);
+
+  const style = { clipPath: clipPathVal };
+
   return (
     <div className={`glyco-avatar-large glyco-${state}`} aria-hidden="true">
-      <span className="glyco-ring ring-one" />
-      <span className="glyco-ring ring-two" />
-      <span className="glyco-ring ring-three" />
-      <span className="glyco-core" />
-      <span className="glyco-nucleus" />
+      <span className="glyco-ring ring-one" style={style} />
+      <span className="glyco-ring ring-two" style={style} />
+      <span className="glyco-ring ring-three" style={style} />
+      <span className="glyco-core" style={style} />
+      <span className="glyco-nucleus" style={style} />
+      <span className="glyco-glass-highlight" style={style} />
     </div>
   );
 }
@@ -88,6 +104,7 @@ function buildUsefulInsight({
   thompsonTitle,
   thompsonType,
   bs,
+  formatGlucose,
 }: {
   current?: number;
   previousAverage?: number;
@@ -99,8 +116,10 @@ function buildUsefulInsight({
   thompsonTitle?: string;
   thompsonType?: string;
   bs?: boolean;
+  formatGlucose: (value?: number) => string;
 }) {
   const useBs = bs ?? false;
+  const formatDelta = (value: number) => formatGlucose(Math.abs(value));
   const delta = current && previousAverage ? current - previousAverage : 0;
   const hasSymptoms = selectedSymptoms.length > 0 || feeling === "low" || feeling === "elevated";
   const symptomText = selectedSymptoms.length
@@ -139,8 +158,8 @@ function buildUsefulInsight({
     return {
       title: useBs ? "Unesite još jedno očitanje i pregledajte posljednji obrok" : "Log one more reading and review the last meal",
       reason: useBs
-        ? `Danas je ${current} mg/dL, oko ${Math.round(delta)} mg/dL iznad vašeg nedavnog prosjeka, a označili ste ${symptomText}.`
-        : `Today is ${current} mg/dL, about ${Math.round(delta)} mg/dL above your recent average, and you marked ${symptomText}.`,
+        ? `Danas je ${formatGlucose(current)}, oko ${formatDelta(delta)} iznad vašeg nedavnog prosjeka, a označili ste ${symptomText}.`
+        : `Today is ${formatGlucose(current)}, about ${formatDelta(delta)} above your recent average, and you marked ${symptomText}.`,
       action: localizeThompsonAction(thompsonTitle, useBs) ?? (useBs ? "Uparite ugljikohidrate s proteinima ili vlaknima" : "Pair carbohydrates with protein or fiber"),
       source: useBs ? "Promijenjeno zbog simptoma i trenutne glukoze" : "Changed by symptoms + current glucose",
       adaptation: thompsonTitle
@@ -169,8 +188,8 @@ function buildUsefulInsight({
     return {
       title: useBs ? "Provjerite šta se danas promijenilo" : "Check what changed today",
       reason: useBs
-        ? `Ovo očitanje je ${Math.round(delta)} mg/dL iznad vašeg nedavnog prosjeka, što je dovoljno da potražite okidač u obroku, stresu, snu ili aktivnosti.`
-        : `This reading is ${Math.round(delta)} mg/dL above your recent average, which is enough to look for a meal, stress, sleep, or activity trigger.`,
+        ? `Ovo očitanje je ${formatDelta(delta)} iznad vašeg nedavnog prosjeka, što je dovoljno da potražite okidač u obroku, stresu, snu ili aktivnosti.`
+        : `This reading is ${formatDelta(delta)} above your recent average, which is enough to look for a meal, stress, sleep, or activity trigger.`,
       action: localizeThompsonAction(thompsonTitle, useBs) ?? (useBs ? "Prošetajte nakon najvećeg obroka" : "Walk after the largest meal"),
       source: useBs ? "Promijenjeno zbog razlike glukoze" : "Changed by glucose delta",
       adaptation: thompsonTitle ? (useBs ? "Tekst akcije i dalje rangira učenje povratne informacije." : "The action text is still ranked by feedback learning.") : (useBs ? "Glyco koristi zadane smjernice dok ne stigne povratna informacija." : "Glyco is using default guidance until feedback exists."),
@@ -192,6 +211,7 @@ function buildUsefulInsight({
 export function Overview() {
   const auth = useAuth();
   const { t, language } = useI18n();
+  const { unit } = useGlucoseUnit();
   const bs = language === "bs";
   const userId = auth.session?.userId ?? 1;
   const navigate = useNavigate();
@@ -200,6 +220,7 @@ export function Overview() {
   const [chatOpen, setChatOpen] = useState(false);
   const [chatExpanding, setChatExpanding] = useState(false);
   const [avatarActivated, setAvatarActivated] = useState(false);
+  const [riskModalOpen, setRiskModalOpen] = useState(false);
   const chatSession = useAgentChatSession();
   const chatThreadRef = useRef<HTMLDivElement>(null);
 
@@ -208,6 +229,7 @@ export function Overview() {
   const bayesian = useQuery({ queryKey: ["bayesian", userId], queryFn: () => api.bayesianRisk(userId) });
   const logs = useQuery({ queryKey: ["logs", userId], queryFn: () => api.logs(userId) });
   const insight = useQuery({ queryKey: ["insight", userId], queryFn: () => api.insight(userId) });
+  const forecast = useQuery({ queryKey: ["forecast", userId], queryFn: () => api.getForecastLatest(userId).catch(() => null), retry: false });
 
   const latestLog = logs.data?.length ? logs.data[logs.data.length - 1] : undefined;
   const daysSinceLastLog = useMemo(() => {
@@ -273,6 +295,7 @@ export function Overview() {
     thompsonTitle: thompsonAction?.title,
     thompsonType: thompsonAction?.type,
     bs,
+    formatGlucose: (value) => formatGlucoseFromMgdl(value, unit),
   });
 
   const chat = useMutation({
@@ -337,23 +360,23 @@ export function Overview() {
         <div className="glyco-orbit">
           <button type="button" className="metric-card glucose" onClick={() => navigate("/metric/glucose")}>
             <span>{bs ? "Nivo glukoze" : "Glucose Level"}</span>
-            <strong>{latestLog?.glucose_level ?? "--"} <small>mg/dL</small></strong>
+            <strong>{formatGlucoseFromMgdl(latestLog?.glucose_level, unit)}</strong>
           </button>
-          <button type="button" className="metric-card nutrition" onClick={() => navigate("/metric/nutrition")}>
+          <button type="button" className="metric-card nutrition" onClick={() => navigate("/care-plan")}>
             <span>{bs ? "Ishrana" : "Nutrition"}</span>
-            <strong>{risk.data?.risk_level === "high" ? (bs ? "Pratiti" : "Watch") : (bs ? "Optimalno" : "Optimal")}</strong>
+            <strong>{bs ? "Plan" : "Plan"}</strong>
           </button>
-          <button type="button" className="metric-card hba1c" onClick={() => navigate("/metric/hba1c")}>
-            <span>HbA1c</span>
-            <strong>6.5 <small>%</small></strong>
+          <button type="button" className="metric-card forecast" onClick={() => navigate("/monitoring")}>
+            <span>{bs ? "Prognoza" : "Forecast"}</span>
+            <strong>{forecast.data?.trend_direction ?? (bs ? "Učenje" : "Learning")}</strong>
           </button>
-          <button type="button" className="metric-card risk-score" onClick={() => navigate("/metric/risk")}>
+          <button type="button" className="metric-card risk-score" onClick={() => setRiskModalOpen(true)}>
             <span>{bs ? "Rizik" : "Risk Score"}</span>
             <strong>{risk.data?.risk_level ?? (bs ? "Učitavanje" : "Loading")}</strong>
           </button>
-          <button type="button" className="metric-card activity" onClick={() => navigate("/metric/activity")}>
-            <span>{bs ? "Dnevna aktivnost" : "Daily Activity"}</span>
-            <strong>{(latestLog?.activity_minutes ?? 0) >= 30 ? (bs ? "Dobro" : "Good") : (bs ? "Nisko" : "Low")}</strong>
+          <button type="button" className="metric-card next-step" onClick={() => navigate("/monitoring")}>
+            <span>{bs ? "Sljedeći korak" : "Next Step"}</span>
+            <strong>{usefulInsight.action}</strong>
           </button>
 
           <div className="glyco-center">
@@ -365,11 +388,11 @@ export function Overview() {
             >
               <GlycoAvatar state={glycoState} />
             </button>
-            <div className="glyco-center-label">
-              <strong>{avatarCopy.title}</strong>
-              <span>{avatarCopy.subtitle}</span>
-            </div>
           </div>
+        </div>
+        <div className="glyco-center-label">
+          <strong>{avatarCopy.title}</strong>
+          <span>{avatarCopy.subtitle}</span>
         </div>
         <div className="agent-learning-strip" aria-label={bs ? "Signali učenja agenta" : "Agent learning signals"}>
           <button type="button" onClick={() => navigate("/metric/bayesian")}>
@@ -435,6 +458,74 @@ export function Overview() {
         />
         <button className="primary" type="submit" aria-label={bs ? "Pošalji poruku" : "Send message"}><ArrowUp size={16} /></button>
       </form>
+
+      {riskModalOpen && (
+        <div
+          className="log-panel-overlay alerts-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label={bs ? "Detalji rizika" : "Risk details"}
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setRiskModalOpen(false);
+          }}
+        >
+          <div className="log-panel risk-panel" onMouseDown={(event) => event.stopPropagation()}>
+            <section className="card">
+              <header>
+                <h2>{bs ? "Šta ovaj rizik znači" : "What this risk means"}</h2>
+                <button
+                  type="button"
+                  className="icon-button"
+                  onClick={() => setRiskModalOpen(false)}
+                  aria-label={bs ? "Zatvori detalje rizika" : "Close risk details"}
+                >
+                  <X size={18} aria-hidden="true" />
+                </button>
+              </header>
+              <div className="card-body risk-panel-body">
+                {risk.isLoading ? (
+                  <LoadingState label={bs ? "Učitavanje procjene rizika" : "Loading risk assessment"} />
+                ) : risk.data ? (
+                  <>
+                    <div className="risk-panel-summary">
+                      <div>
+                        <span>{bs ? "Trenutni nivo" : "Current level"}</span>
+                        <strong>{risk.data.risk_level}</strong>
+                      </div>
+                      <div>
+                        <span>{bs ? "Procijenjena vjerovatnoća" : "Estimated probability"}</span>
+                        <strong>{Math.round(risk.data.risk_probability * 100)}%</strong>
+                      </div>
+                      <div>
+                        <span>{bs ? "Model" : "Model"}</span>
+                        <strong>{risk.data.model_version}</strong>
+                      </div>
+                    </div>
+                    <p className="risk-panel-explanation">{risk.data.explanation}</p>
+                    <section className="risk-panel-section">
+                      <strong>{bs ? "Šta je najviše uticalo" : "What influenced it most"}</strong>
+                      <FactorList items={risk.data.top_factors} />
+                    </section>
+                    <section className="risk-panel-section">
+                      <strong>{bs ? "Šta sada ima smisla uraditi" : "What makes sense to do now"}</strong>
+                      <div className="risk-panel-actions">
+                        {risk.data.next_actions.map((action) => (
+                          <div key={action} className="risk-panel-action-item">{action}</div>
+                        ))}
+                      </div>
+                    </section>
+                  </>
+                ) : (
+                  <ErrorState
+                    title={bs ? "Procjena rizika nije dostupna" : "Risk assessment is unavailable"}
+                    body={bs ? "Glyco trenutno nema dovoljno podataka da objasni ovaj signal." : "Glyco does not currently have enough data to explain this signal."}
+                  />
+                )}
+              </div>
+            </section>
+          </div>
+        </div>
+      )}
 
       {chatOpen && (
         <aside className={`glyco-chat-window ${chatExpanding ? "route-expanding" : ""}`} aria-label={bs ? "Glyco chat prozor" : "Glyco chat window"}>

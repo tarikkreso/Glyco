@@ -6,6 +6,7 @@ import { api, type ForecastAccuracy, type GlucoseForecast, type MonitoringAssess
 import { useAuth } from "../auth/auth";
 import { Badge, Card, EmptyState, ErrorState, LoadingState, PageHeader } from "../components/ui";
 import { useI18n } from "../i18n";
+import { formatGlucoseFromMgdl, formatGlucoseFromMmol, useGlucoseUnit } from "../utils/glucoseUnits";
 
 function trendTone(label?: string) {
   if (label === "concerning") return "danger";
@@ -39,10 +40,10 @@ function forecastHeadline(forecast: GlucoseForecast | null, monitoring: Monitori
   return t("monitoring.patternSteady");
 }
 
-function forecastSummary(forecast: GlucoseForecast | null, monitoring: MonitoringAssessment | undefined, t: (key: string) => string) {
+function forecastSummary(forecast: GlucoseForecast | null, monitoring: MonitoringAssessment | undefined, t: (key: string) => string, unit: "mmol" | "mgdl") {
   if (forecast) {
     if (forecast.predicted_low_alert || forecast.predicted_high_alert) return forecast.recommendation;
-    return `${t("monitoring.forecast")} ${forecast.trend_direction}: +60 min ${forecast.predictions["60"]} mmol/L. ${t("monitoring.forecastsEstimate")}`;
+    return `${t("monitoring.forecast")} ${forecast.trend_direction}: +60 min ${formatGlucoseFromMmol(forecast.predictions["60"], unit)}. ${t("monitoring.forecastsEstimate")}`;
   }
   return String(monitoring?.summary.message ?? t("monitoring.noForecastPrompt"));
 }
@@ -70,15 +71,16 @@ function ForecastActualDot(props: { cx?: number; cy?: number; payload?: { is_fas
 
 function ForecastTooltip({ active, label, payload }: { active?: boolean; label?: number; payload?: Array<{ dataKey?: string; value?: number; payload?: { is_fasting?: boolean; actual?: number; forecast?: number; forecastBand?: [number, number] } }> }) {
   const { t } = useI18n();
+  const { unit } = useGlucoseUnit();
   if (!active || !payload?.length) return null;
   const point = payload.find((item) => item.payload?.actual != null || item.payload?.forecast != null)?.payload;
   if (!point) return null;
   return (
     <div className="forecast-tooltip">
       <strong>{label ? new Date(Number(label)).toLocaleString() : t("monitoring.recent")}</strong>
-      {point.actual != null && <span>{t("monitoring.actual")}: {point.actual} mmol/L ({point.is_fasting ? t("log.fasting") : t("log.notFasting")})</span>}
-      {point.forecast != null && <span>{t("monitoring.forecast")}: {point.forecast} mmol/L</span>}
-      {point.forecastBand && <span>Confidence: {point.forecastBand[0]}-{point.forecastBand[1]} mmol/L</span>}
+      {point.actual != null && <span>{t("monitoring.actual")}: {formatGlucoseFromMmol(point.actual, unit)} ({point.is_fasting ? t("log.fasting") : t("log.notFasting")})</span>}
+      {point.forecast != null && <span>{t("monitoring.forecast")}: {formatGlucoseFromMmol(point.forecast, unit)}</span>}
+      {point.forecastBand && <span>Confidence: {formatGlucoseFromMmol(point.forecastBand[0], unit)}-{formatGlucoseFromMmol(point.forecastBand[1], unit)}</span>}
     </div>
   );
 }
@@ -86,6 +88,7 @@ function ForecastTooltip({ active, label, payload }: { active?: boolean; label?:
 function ForecastChart({ actualLogs, forecast, monitoring, accuracy, userId }: { actualLogs: Array<{ timestamp: string; glucose_mmol: number; is_fasting: boolean }>; forecast: GlucoseForecast | null; monitoring?: MonitoringAssessment; accuracy?: ForecastAccuracy; userId: number }) {
   const queryClient = useQueryClient();
   const { t } = useI18n();
+  const { unit } = useGlucoseUnit();
   const [historyHours, setHistoryHours] = useState<8 | 24 | 48 | "all">(24);
   const refreshForecast = useMutation({
     mutationFn: () => api.triggerForecast(userId),
@@ -185,7 +188,7 @@ function ForecastChart({ actualLogs, forecast, monitoring, accuracy, userId }: {
           return (
             <div key={horizon}>
               <span>{horizon} min MAE</span>
-              <strong>{row?.count ? `${row.mae.toFixed(2)} mmol/L` : personalMae ? `${personalMae.toFixed(2)} mmol/L` : "-"}</strong>
+              <strong>{row?.count ? formatGlucoseFromMmol(row.mae, unit) : personalMae ? formatGlucoseFromMmol(personalMae, unit) : "-"}</strong>
               <small>{row?.count ?? 0} {t("monitoring.checked")}</small>
             </div>
           );
@@ -198,6 +201,7 @@ function ForecastChart({ actualLogs, forecast, monitoring, accuracy, userId }: {
 export function Monitoring() {
   const auth = useAuth();
   const { t } = useI18n();
+  const { unit } = useGlucoseUnit();
   const userId = auth.session?.userId ?? 1;
   const [showAllReadings, setShowAllReadings] = useState(false);
   const logs = useQuery({ queryKey: ["logs", userId], queryFn: () => api.logs(userId) });
@@ -228,10 +232,10 @@ export function Monitoring() {
         <div>
           <span>{t("monitoring.bottomLine")}</span>
           <h2>{forecastHeadline(forecast.data ?? null, monitoring.data, t)}</h2>
-          <p>{forecastSummary(forecast.data ?? null, monitoring.data, t)}</p>
+          <p>{forecastSummary(forecast.data ?? null, monitoring.data, t, unit)}</p>
         </div>
         <div className="monitoring-hero-stats">
-          <div><span>{t("monitoring.latestGlucose")}</span><strong>{latestLog ? `${latestLog.glucose_level} mg/dL` : "-"}</strong></div>
+          <div><span>{t("monitoring.latestGlucose")}</span><strong>{formatGlucoseFromMgdl(latestLog?.glucose_level, unit)}</strong></div>
           <div><span>{t("monitoring.forecast")}</span><strong>{forecastStatus}</strong></div>
           <div><span>{t("monitoring.historicalTrend")}</span><strong>{weekStatus}</strong></div>
           <div><span>{t("monitoring.evaluatedForecasts")}</span><strong>{accuracy.data?.total_evaluations ?? 0}</strong></div>
@@ -255,7 +259,7 @@ export function Monitoring() {
                 {visibleReadings.map((log) => (
                   <div key={log.id}>
                     <span>{log.reading_time || log.created_at ? new Date(log.reading_time ?? log.created_at ?? "").toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : log.log_date}</span>
-                    <strong>{log.glucose_level} mg/dL</strong>
+                    <strong>{formatGlucoseFromMgdl(log.glucose_level, unit)}</strong>
                     <span>{log.is_fasting ? t("log.fasting") : t("log.notFasting")}</span>
                   </div>
                 ))}
@@ -275,7 +279,7 @@ export function Monitoring() {
               <p>{nextCheckText(forecast.data ?? null, t)}</p>
             </section>
             <div className="forecast-context-chips">
-              <Badge>{latestLog ? `${latestLog.glucose_level} mg/dL` : t("monitoring.noReading")}</Badge>
+              <Badge>{latestLog ? formatGlucoseFromMgdl(latestLog.glucose_level, unit) : t("monitoring.noReading")}</Badge>
               <Badge tone={trendBadgeTone(forecast.data?.trend_direction)}>{forecast.data?.trend_direction ?? "forecast pending"}</Badge>
               <Badge tone={forecast.data?.predicted_low_alert ? "danger" : forecast.data?.predicted_high_alert ? "warning" : "good"}>{forecast.data?.predicted_low_alert ? t("monitoring.lowAlert") : forecast.data?.predicted_high_alert ? t("monitoring.highAlert") : t("monitoring.noAlert")}</Badge>
               <Badge>{forecast.data?.forecast_quality ?? "needs_more_data"}</Badge>

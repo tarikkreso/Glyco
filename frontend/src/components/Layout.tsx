@@ -1,4 +1,4 @@
-import { Activity, BarChart3, ClipboardList, FileText, Home, Menu, MessageSquareText, PanelLeftClose, PanelLeftOpen, Settings, Share2, Utensils } from "lucide-react";
+import { Activity, BarChart3, FileText, Home, Menu, MessageSquareText, PanelLeftClose, PanelLeftOpen, Settings, Share2, Utensils } from "lucide-react";
 import { useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/auth";
@@ -11,7 +11,7 @@ const nav = [
   { to: "/agent", labelKey: "nav.agent", icon: MessageSquareText },
   { to: "/monitoring", labelKey: "nav.monitoring", icon: Activity },
   { to: "/reports", labelKey: "nav.reports", icon: FileText },
-  { to: "/care-plan", labelKey: "nav.carePlan", icon: ClipboardList },
+  { to: "/care-plan", labelKey: "nav.carePlan", icon: Utensils },
   { to: "/family", labelKey: "nav.family", icon: Share2 },
   { to: "/profile", labelKey: "nav.profile", icon: Settings },
 ];
@@ -86,7 +86,7 @@ export function Layout() {
         </main>
         <nav className="bottom-nav">
           {nav.slice(0, 5).map((item) => {
-            const Icon = item.icon === ClipboardList ? Utensils : item.icon;
+            const Icon = item.icon;
             return <NavLink to={item.to} key={item.to}><Icon size={17} /><span>{t(item.labelKey).split(" ")[0]}</span></NavLink>;
           })}
         </nav>

@@ -338,8 +338,8 @@ def _build_concise_prompt(messages: list[dict], tools_context: dict) -> str:
     risk = summary["risk"]
     bayesian = summary["bayesian"]
     trend = summary["trend"]
-    risk_source = "RF risk model" if risk.get("model_version") == "random-forest-0.2" else "risk fallback scorer"
-    trend_source = "glucose trend model" if trend.get("model_version") == "glucose-trend-random-forest-0.2" else "monitoring fallback scorer"
+    risk_source = "risk model" if risk.get("model_version") == "hist-gradient-boosting-risk-0.3" else "risk fallback scorer"
+    trend_source = "glucose trend model" if trend.get("model_version") == "glucose-trend-random-forest-0.3" else "monitoring fallback scorer"
     guidance = "; ".join(item.get("text", "") for item in summary["guidelines"][:2] if item.get("text"))
     learning = summary["learning"]
     next_action = learning.get("next_best_action") or {}
@@ -384,8 +384,8 @@ def _build_gemini_prompt(messages: list[dict], tools_context: dict) -> str:
     risk = summary["risk"]
     bayesian = summary["bayesian"]
     trend = summary["trend"]
-    risk_source = "trained RF risk model" if risk.get("model_version") == "random-forest-0.2" else "risk fallback scorer"
-    trend_source = "trained glucose trend model" if trend.get("model_version") == "glucose-trend-random-forest-0.2" else "monitoring fallback scorer"
+    risk_source = "trained risk model" if risk.get("model_version") == "hist-gradient-boosting-risk-0.3" else "risk fallback scorer"
+    trend_source = "trained glucose trend model" if trend.get("model_version") == "glucose-trend-random-forest-0.3" else "monitoring fallback scorer"
     top_factors = risk.get("top_factors") or []
     related_flags = risk.get("related_flags") or []
     anomaly_flags = trend.get("anomaly_flags") or []
@@ -437,7 +437,7 @@ Patient summary:
 - General health rating: {profile.get("general_health", "unknown")}
 - Risk source: {risk_source}
 - Risk source version: {risk.get("model_version", "unknown")}
-- RF risk level: {risk.get("risk_level", "unknown")}
+- Risk model level: {risk.get("risk_level", "unknown")}
 - Risk probability: {risk.get("risk_probability", "unknown")}
 - Bayesian posterior risk mean: {bayesian.get("posterior_mean", "unknown")}
 - Bayesian credible interval: {(bayesian.get("credible_interval") or {}).get("low", "unknown")}-{(bayesian.get("credible_interval") or {}).get("high", "unknown")}
@@ -507,8 +507,8 @@ def build_rich_system_prompt(tools_context: dict, language: str = "en") -> str:
     risk = summary["risk"]
     bayesian = summary["bayesian"]
     trend = summary["trend"]
-    risk_source = "trained RF risk model" if risk.get("model_version") == "random-forest-0.2" else "risk fallback scorer"
-    trend_source = "trained glucose trend model" if trend.get("model_version") == "glucose-trend-random-forest-0.2" else "monitoring fallback scorer"
+    risk_source = "trained risk model" if risk.get("model_version") == "hist-gradient-boosting-risk-0.3" else "risk fallback scorer"
+    trend_source = "trained glucose trend model" if trend.get("model_version") == "glucose-trend-random-forest-0.3" else "monitoring fallback scorer"
     top_factors = risk.get("top_factors") or []
     related_flags = risk.get("related_flags") or []
     anomaly_flags = trend.get("anomaly_flags") or []
@@ -589,7 +589,7 @@ Patient summary:
 - Family history of diabetes: {profile.get("family_history_diabetes", "unknown")}
 - Risk source: {risk_source}
 - Risk source version: {risk.get("model_version", "unknown")}
-- RF risk level: {risk.get("risk_level", "unknown")}
+- Risk model level: {risk.get("risk_level", "unknown")}
 - Risk probability: {risk.get("risk_probability", "unknown")}
 - Bayesian posterior risk mean: {bayesian.get("posterior_mean", "unknown")}
 - Bayesian credible interval: {(bayesian.get("credible_interval") or {}).get("low", "unknown")}-{(bayesian.get("credible_interval") or {}).get("high", "unknown")}

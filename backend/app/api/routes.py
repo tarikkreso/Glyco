@@ -287,7 +287,7 @@ def latest_risk(user_id: int, db: Session = Depends(get_db)):
     """Return or refresh the latest Random Forest risk assessment."""
     row = db.query(models.RiskAssessment).filter(models.RiskAssessment.user_id == user_id).order_by(models.RiskAssessment.created_at.desc()).first()
     profile = db.query(models.Profile).filter(models.Profile.user_id == user_id).order_by(models.Profile.created_at.desc()).first()
-    if row and profile and (row.model_version != "random-forest-0.2" or profile.updated_at > row.created_at):
+    if row and profile and (row.model_version != "hist-gradient-boosting-risk-0.3" or profile.updated_at > row.created_at):
         return create_risk_assessment(db, profile)
     if not row:
         if not profile:
@@ -307,7 +307,7 @@ def bayesian_risk(user_id: int, db: Session = Depends(get_db)):
 @router.post("/logs", response_model=HealthLogOut)
 def create_log(payload: HealthLogIn, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """Create a glucose log and update monitoring and alerts."""
-    reading_time = payload.reading_time or datetime.utcnow()
+    reading_time = payload.reading_time or datetime.now()
     if reading_time.tzinfo is not None:
         # SQLite stores naive datetimes; keep an absolute UTC instant for matching forecasts.
         reading_time = reading_time.astimezone(timezone.utc).replace(tzinfo=None)
@@ -344,7 +344,7 @@ def latest_monitoring(user_id: int, db: Session = Depends(get_db)):
     """Return or refresh the latest monitoring assessment."""
     row = db.query(models.MonitoringAssessment).filter(models.MonitoringAssessment.user_id == user_id).order_by(models.MonitoringAssessment.created_at.desc()).first()
     latest_log = db.query(models.HealthLog).filter(models.HealthLog.user_id == user_id).order_by(models.HealthLog.created_at.desc(), models.HealthLog.log_date.desc()).first()
-    if row and (row.model_version != "glucose-trend-random-forest-0.2" or (latest_log and latest_log.created_at > row.created_at)):
+    if row and (row.model_version != "glucose-trend-random-forest-0.3" or (latest_log and latest_log.created_at > row.created_at)):
         return create_monitoring_assessment(db, user_id)
     if not row:
         return create_monitoring_assessment(db, user_id)

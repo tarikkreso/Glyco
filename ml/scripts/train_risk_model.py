@@ -6,12 +6,22 @@ from pathlib import Path
 
 import joblib
 import pandas as pd
-from sklearn.ensemble import RandomForestClassifier
+import numpy as np
+
+from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import classification_report, confusion_matrix, roc_auc_score
+from sklearn.metrics import (
+    average_precision_score,
+    brier_score_loss,
+    classification_report,
+    confusion_matrix,
+    precision_recall_curve,
+    roc_auc_score,
+)
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
+from sklearn.utils.class_weight import compute_sample_weight
 
 ROOT = Path(__file__).resolve().parents[2]
 ZIP_PATH = ROOT / "diabetes_binary_health_indicators_BRFSS2015.csv.zip"
@@ -64,22 +74,40 @@ def main() -> None:
     baseline = Pipeline([("scale", StandardScaler()), ("model", LogisticRegression(max_iter=1000, class_weight="balanced"))])
     baseline.fit(x_train, y_train)
 
-    model = RandomForestClassifier(n_estimators=220, random_state=42, class_weight="balanced_subsample", min_samples_leaf=4, n_jobs=1)
-    model.fit(x_train, y_train)
+    sample_weights = compute_sample_weight("balanced", y_train)
+    model = HistGradientBoostingClassifier(
+        max_iter=360,
+        learning_rate=0.035,
+        l2_regularization=0.02,
+        max_leaf_nodes=63,
+        min_samples_leaf=30,
+        random_state=42,
+    )
+    model.fit(x_train, y_train, sample_weight=sample_weights)
 
     probabilities = model.predict_proba(x_test)[:, 1]
-    threshold = 0.50
+    precision, recall, thresholds = precision_recall_curve(y_test, probabilities)
+    f1_scores = 2 * precision * recall / (precision + recall + 1e-12)
+    threshold_index = int(np.nanargmax(f1_scores[:-1]))
+    threshold = float(thresholds[threshold_index])
     predictions = (probabilities >= threshold).astype(int)
     metrics = {
         "rows": int(len(df)),
         "features": list(x_train.columns),
         "roc_auc": float(roc_auc_score(y_test, probabilities)),
+        "average_precision": float(average_precision_score(y_test, probabilities)),
+        "brier_score": float(brier_score_loss(y_test, probabilities)),
         "classification_report": classification_report(y_test, predictions, output_dict=True),
+        "classification_report_at_0_50": classification_report(y_test, (probabilities >= 0.50).astype(int), output_dict=True),
         "confusion_matrix": confusion_matrix(y_test, predictions).tolist(),
         "threshold": threshold,
-        "operating_point": "balanced_precision_recall",
-        "model_version": "random-forest-0.2",
+        "operating_point": "max_positive_class_f1",
+        "model_version": "hist-gradient-boosting-risk-0.3",
         "split_strategy": split_strategy,
+        "baseline": {
+            "model": "logistic_regression_balanced",
+            "accuracy": float(baseline.score(x_test, y_test)),
+        },
     }
     joblib.dump(model, ARTIFACTS / "risk_model.joblib")
     joblib.dump({"features": list(x_train.columns), "threshold": threshold}, ARTIFACTS / "risk_preprocessor.joblib")

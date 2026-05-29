@@ -296,11 +296,11 @@ def _get_care_plan_for_agent(db: Session, user_id: int) -> dict:
 
 
 def _risk_tool_label(model_version: str) -> str:
-    return "Trained RF risk model" if model_version == "random-forest-0.2" else "Risk fallback scorer"
+    return "Trained risk model" if model_version == "hist-gradient-boosting-risk-0.3" else "Risk fallback scorer"
 
 
 def _trend_tool_label(model_version: str) -> str:
-    return "Trained glucose trend model" if model_version == "glucose-trend-random-forest-0.2" else "Monitoring fallback scorer"
+    return "Trained glucose trend model" if model_version == "glucose-trend-random-forest-0.3" else "Monitoring fallback scorer"
 
 
 def build_agent_tool_pipeline(db: Session, user_id: int, message: str) -> dict:

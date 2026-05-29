@@ -237,6 +237,7 @@ def _model() -> LGBMRegressor:
         reg_lambda=0.2,
         random_state=RANDOM_STATE,
         n_jobs=-1,
+        verbose=-1,
     )
 
 

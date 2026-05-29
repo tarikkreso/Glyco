@@ -46,6 +46,7 @@ class GlucoseForecastService:
         self.shift_steps: dict[str, int] = {}
         self.thresholds: dict[str, float] = DEFAULT_THRESHOLDS.copy()
         self.mae_per_horizon: dict[str, float] = {str(horizon): 1.5 for horizon in HORIZONS}
+        self.deployment_strategy_per_horizon: dict[str, str] = {str(horizon): "lgbm" for horizon in HORIZONS}
         self.model_version = "rules-forecast-fallback-0.1"
         self.fallback_model_version = "rules-forecast-fallback-0.1"
         self.postprandial_metadata: dict[str, Any] = {}
@@ -74,6 +75,10 @@ class GlucoseForecastService:
                 for key, value in self.metadata.get("mae_per_horizon", self.mae_per_horizon).items()
             }
             self.model_version = str(self.metadata.get("model_version", self.model_version))
+            self.deployment_strategy_per_horizon = {
+                str(horizon): str(self.metadata.get("deployment_strategy_per_horizon", {}).get(str(horizon), "lgbm"))
+                for horizon in HORIZONS
+            }
         except Exception as exc:
             failed.append(f"{metadata_path.name}: {exc}")
 
@@ -328,6 +333,23 @@ class GlucoseForecastService:
             return "falling"
         return "stable"
 
+    def _prediction_from_strategy(self, horizon: int, feature_row: dict[str, float], frame: pd.DataFrame) -> float:
+        """Return the configured dense-CGM prediction for one horizon."""
+        strategy = self.deployment_strategy_per_horizon.get(str(horizon), "lgbm")
+        current = float(feature_row["glucose_current"])
+        if strategy == "lgbm":
+            return float(self.models[str(horizon)].predict(frame)[0])
+        if strategy == "persistence":
+            return current
+        if strategy == "last_delta":
+            return current + (current - float(feature_row["lag_1"]))
+        if strategy == "half_delta":
+            return current + 0.5 * (current - float(feature_row["lag_1"]))
+        if strategy == "rolling_mean_6":
+            return float(feature_row["roll_mean_6"])
+        logger.warning("Unknown forecast deployment strategy %s; using persistence", strategy)
+        return current
+
     def predict(self, user_id: int, logs: list[dict]) -> dict[str, Any]:
         """
         Main prediction method. Returns a forecast result dict.
@@ -348,7 +370,7 @@ class GlucoseForecastService:
 
         frame = pd.DataFrame([feature_row], columns=self.feature_columns)
         predictions = {
-            str(horizon): round(float(self.models[str(horizon)].predict(frame)[0]), 2)
+            str(horizon): round(max(2.0, min(25.0, self._prediction_from_strategy(horizon, feature_row, frame))), 2)
             for horizon in HORIZONS
         }
         confidence = {}

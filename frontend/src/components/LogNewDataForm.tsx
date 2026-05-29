@@ -5,6 +5,7 @@ import { api } from "../api/client";
 import { useI18n } from "../i18n";
 import { ErrorState } from "./ui";
 import { useToast } from "./ui";
+import { displayInputFromMgdl, glucoseInputConfig, mgdlFromDisplayInput, useGlucoseUnit } from "../utils/glucoseUnits";
 
 export type LogNewDataValues = {
   glucose_level: number;
@@ -38,7 +39,7 @@ function GlucoseWheel({
   const itemHeight = 40;
   const values = useMemo(() => {
     const list: number[] = [];
-    for (let v = min; v <= max; v += step) list.push(v);
+    for (let v = min; v <= max + step / 2; v += step) list.push(Number(v.toFixed(1)));
     return list;
   }, [max, min, step]);
 
@@ -89,23 +90,33 @@ export function LogNewDataForm({
   const queryClient = useQueryClient();
   const toast = useToast();
   const { t } = useI18n();
-
-  const GLUCOSE_MIN = 40;
-  const GLUCOSE_MAX = 500;
+  const { unit } = useGlucoseUnit();
+  const inputConfig = glucoseInputConfig(unit);
 
   const [step, setStep] = useState<"type" | "value">("type");
   const [isFasting, setIsFasting] = useState(true);
-  const [glucoseLevel, setGlucoseLevel] = useState(128);
-  const [glucoseDraft, setGlucoseDraft] = useState("128");
+  const [glucoseLevel, setGlucoseLevel] = useState(inputConfig.defaultValue);
+  const [glucoseDraft, setGlucoseDraft] = useState(String(inputConfig.defaultValue));
   const [readingTime, setReadingTime] = useState(() => datetimeLocalValue(new Date()));
+  const previousUnitRef = useRef(unit);
+
+  useEffect(() => {
+    const previousUnit = previousUnitRef.current;
+    if (previousUnit === unit) return;
+    const currentMgdl = mgdlFromDisplayInput(glucoseLevel, previousUnit);
+    const next = displayInputFromMgdl(currentMgdl, unit);
+    setGlucoseLevel(next);
+    setGlucoseDraft(String(next));
+    previousUnitRef.current = unit;
+  }, [glucoseLevel, unit]);
 
   const setGlucoseCommitted = useCallback(
     (next: number) => {
-      const clamped = clamp(next, GLUCOSE_MIN, GLUCOSE_MAX);
+      const clamped = clamp(next, inputConfig.min, inputConfig.max);
       setGlucoseLevel(clamped);
       setGlucoseDraft(String(clamped));
     },
-    [GLUCOSE_MAX, GLUCOSE_MIN]
+    [inputConfig.max, inputConfig.min]
   );
 
   const addLog = useMutation({
@@ -128,7 +139,7 @@ export function LogNewDataForm({
         queryClient.invalidateQueries({ queryKey: ["alerts"] }),
       ]);
       setStep("type");
-      setGlucoseCommitted(128);
+      setGlucoseCommitted(inputConfig.defaultValue);
       setReadingTime(datetimeLocalValue(new Date()));
       toast({
         tone: "success",
@@ -143,12 +154,12 @@ export function LogNewDataForm({
     const parsed = Number(glucoseDraft);
     const nextValue = clamp(
       Number.isFinite(parsed) ? parsed : glucoseLevel,
-      GLUCOSE_MIN,
-      GLUCOSE_MAX
+      inputConfig.min,
+      inputConfig.max
     );
     setGlucoseCommitted(nextValue);
     addLog.mutate({
-      glucose_level: nextValue,
+      glucose_level: Math.round(mgdlFromDisplayInput(nextValue, unit)),
       is_fasting: isFasting ? "true" : "false",
       reading_time: readingTime,
     });
@@ -199,22 +210,22 @@ export function LogNewDataForm({
           </div>
 
           <label className="span-all">
-            <span>{t("log.glucoseLevel")}</span>
+            <span>{t("log.glucoseLevel")} ({unit === "mgdl" ? "mg/dL" : "mmol/L"})</span>
             <div className="number-input-row">
               <button
                 type="button"
                 className="icon-button"
                 aria-label={t("log.increaseGlucose")}
-                onClick={() => setGlucoseCommitted(glucoseLevel + 1)}
+                onClick={() => setGlucoseCommitted(glucoseLevel + inputConfig.step)}
               >
                 <ChevronUp size={18} aria-hidden="true" />
               </button>
               <input
                 type="number"
                 inputMode="numeric"
-                min={GLUCOSE_MIN}
-                max={GLUCOSE_MAX}
-                step={1}
+                min={inputConfig.min}
+                max={inputConfig.max}
+                step={inputConfig.step}
                 value={glucoseDraft}
                 onChange={(event) => setGlucoseDraft(event.target.value)}
                 onBlur={() => {
@@ -230,13 +241,13 @@ export function LogNewDataForm({
                 type="button"
                 className="icon-button"
                 aria-label={t("log.decreaseGlucose")}
-                onClick={() => setGlucoseCommitted(glucoseLevel - 1)}
+                onClick={() => setGlucoseCommitted(glucoseLevel - inputConfig.step)}
               >
                 <ChevronDown size={18} aria-hidden="true" />
               </button>
             </div>
 
-            <GlucoseWheel value={glucoseLevel} onChange={setGlucoseCommitted} />
+            <GlucoseWheel value={glucoseLevel} onChange={setGlucoseCommitted} min={inputConfig.min} max={inputConfig.max} step={inputConfig.step} />
           </label>
 
           <label className="span-all">

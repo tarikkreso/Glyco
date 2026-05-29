@@ -17,6 +17,7 @@ import { api } from "../api/client";
 import { useAuth } from "../auth/auth";
 import { Badge, EmptyState, ErrorState, LoadingState, PageHeader } from "../components/ui";
 import { useI18n } from "../i18n";
+import { formatGlucoseFromMgdl, useGlucoseUnit } from "../utils/glucoseUnits";
 
 function percent(value?: number) {
   return typeof value === "number" ? `${Math.round(value * 100)}%` : "-";
@@ -98,6 +99,7 @@ function renderMealText(item: string) {
 export function CarePlan() {
   const auth = useAuth();
   const { language, t } = useI18n();
+  const { unit } = useGlucoseUnit();
   const bs = language === "bs";
   const userId = auth.session?.userId ?? 1;
   const queryClient = useQueryClient();
@@ -130,8 +132,8 @@ export function CarePlan() {
   const generatedAt = plan.dataUpdatedAt
     ? new Date(plan.dataUpdatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
     : "not generated";
-  const latestReading = signals?.latest_glucose ? `${signals.latest_glucose} mg/dL` : "-";
-  const forecast60 = signals?.forecast_60_mg_dl ? `${signals.forecast_60_mg_dl} mg/dL` : "-";
+  const latestReading = formatGlucoseFromMgdl(signals?.latest_glucose, unit);
+  const forecast60 = formatGlucoseFromMgdl(signals?.forecast_60_mg_dl, unit);
   const calorieTarget = signals?.daily_calorie_target ? `${signals.daily_calorie_target} kcal` : "-";
   const source = sourceLabel(plan.data?.source);
 
@@ -148,7 +150,7 @@ export function CarePlan() {
       <section className="care-plan-hero">
         <div className="care-plan-hero-copy">
           <span className="generator-kicker"><ChefHat size={16} /> {t("carePlan.generatorKicker")}</span>
-          <h2>{String(plan.data?.direction ?? t("carePlan.generatePrompt"))}</h2>
+          <h2>{t("carePlan.heroTitle")}</h2>
           <p>{t("carePlan.description")}</p>
           <div className="care-plan-action-row">
             <button type="button" className="generate-plan-button" onClick={handleGenerate} disabled={isGenerating || plan.isFetching}>
@@ -161,7 +163,7 @@ export function CarePlan() {
         </div>
         <div className="care-plan-signal-board">
           <div><span>{t("carePlan.latestReading")}</span><strong>{latestReading}</strong><small>{readingKind(signals?.latest_is_fasting)}</small></div>
-          <div><span>{t("carePlan.rfRisk")}</span><strong>{signals?.risk_level ?? "-"}</strong><small>{signals?.risk_model_version ?? (bs ? "učitavanje" : "loading")}</small></div>
+          <div><span>{t("carePlan.risk")}</span><strong>{signals?.risk_level ?? "-"}</strong><small>{signals?.risk_model_version ?? (bs ? "učitavanje" : "loading")}</small></div>
           <div><span>{t("carePlan.trend")}</span><strong>{signals?.trend_label ?? "-"}</strong><small>{signals?.trend_model_version ?? (bs ? "učitavanje" : "loading")}</small></div>
           <div><span>{t("carePlan.bayesianRisk")}</span><strong>{percent(signals?.bayesian_posterior)}</strong><small>{t("carePlan.posteriorMean")}</small></div>
         </div>
@@ -223,8 +225,8 @@ export function CarePlan() {
             </div>
             <div className="model-evidence-list">
               <div><span>{t("carePlan.readingType")}</span><strong>{readingKind(signals?.latest_is_fasting)}</strong><small>{latestReading}</small></div>
-              <div><span>{t("carePlan.avgFasting")}</span><strong>{signals?.avg_fasting ? `${signals.avg_fasting} mg/dL` : "-"}</strong><small>{bs ? "nedavni zapisi" : "recent logs"}</small></div>
-              <div><span>{t("carePlan.avgPostMeal")}</span><strong>{signals?.avg_post_meal ? `${signals.avg_post_meal} mg/dL` : "-"}</strong><small>{bs ? "nedavni zapisi" : "recent logs"}</small></div>
+              <div><span>{t("carePlan.avgFasting")}</span><strong>{formatGlucoseFromMgdl(signals?.avg_fasting, unit)}</strong><small>{bs ? "nedavni zapisi" : "recent logs"}</small></div>
+              <div><span>{t("carePlan.avgPostMeal")}</span><strong>{formatGlucoseFromMgdl(signals?.avg_post_meal, unit)}</strong><small>{bs ? "nedavni zapisi" : "recent logs"}</small></div>
               <div><span>{t("carePlan.learnedFocus")}</span><strong>{signals?.top_recommendation_type ?? "-"}</strong><small>{t("carePlan.thompsonRanker")}</small></div>
               <div><span>{bs ? "Prognoza za 60 min" : "60 min forecast"}</span><strong>{forecast60}</strong><small>{signals?.forecast_trend_direction ?? "-"}</small></div>
               <div><span>{bs ? "Kalorijski cilj" : "Calorie target"}</span><strong>{calorieTarget}</strong><small>{signals?.sample_day_calories ? `${signals.sample_day_calories} kcal ${bs ? "u planu" : "in plan"}` : "-"}</small></div>
