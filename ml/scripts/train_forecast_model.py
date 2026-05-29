@@ -97,7 +97,7 @@ def train_forecast_models() -> dict[str, object]:
         joblib.dump(model, ARTIFACTS_DIR / f"forecast_model_{horizon}min.pkl")
 
     metadata = {
-        "model_version": "lgbm-forecast-0.1",
+        "model_version": "lgbm-forecast-0.2",
         "feature_columns": feature_columns,
         "target_columns": target_columns,
         "shift_steps": feature_metadata["shift_steps"],

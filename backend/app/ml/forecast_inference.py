@@ -134,6 +134,43 @@ class GlucoseForecastService:
             return False
         return median_gap < 10.0
 
+    def _meal_context_features(self, logs: list[dict], last_timestamp: pd.Timestamp, current: float) -> dict[str, float]:
+        """Build fasting and post-meal context features from recent app logs."""
+        ordered = sorted(
+            (
+                {**item, "timestamp": pd.to_datetime(item.get("timestamp"), errors="coerce", utc=False)}
+                for item in logs
+            ),
+            key=lambda item: item["timestamp"] if pd.notna(item["timestamp"]) else pd.Timestamp.min,
+        )
+        valid = [item for item in ordered if pd.notna(item["timestamp"])]
+        last = valid[-1] if valid else {}
+        last_is_fasting = bool(last.get("is_fasting", True))
+        post_meal_logs = [item for item in valid if item.get("is_fasting") is False]
+        recent_post_meal = [
+            item
+            for item in post_meal_logs
+            if 0 <= (last_timestamp - item["timestamp"]).total_seconds() <= 4 * 60 * 60
+        ]
+        fasting_values = [
+            _as_mmol(float(item.get("glucose_mmol", item.get("glucose_level", np.nan))))
+            for item in valid
+            if item.get("is_fasting") is True and pd.notna(item.get("glucose_mmol", item.get("glucose_level", np.nan)))
+        ]
+        last_post_time = post_meal_logs[-1]["timestamp"] if post_meal_logs else None
+        minutes_since_post = 720.0
+        if last_post_time is not None:
+            # A capped value keeps old meals from dominating the model input scale.
+            minutes_since_post = min(720.0, max(0.0, (last_timestamp - last_post_time).total_seconds() / 60.0))
+        baseline = float(np.mean(fasting_values)) if fasting_values else current
+        return {
+            "is_fasting": float(last_is_fasting),
+            "last_reading_is_post_meal": float(not last_is_fasting),
+            "minutes_since_last_post_meal": float(minutes_since_post),
+            "recent_post_meal_readings_4h": float(len(recent_post_meal)),
+            "post_meal_delta": float(current - baseline),
+        }
+
     def _build_feature_row(self, logs: list[dict]) -> dict[str, float] | None:
         """
         Build a single feature row from a list of recent glucose logs.
@@ -197,6 +234,7 @@ class GlucoseForecastService:
         feature_row["time_of_day_cos"] = float(np.cos(2 * np.pi * last_timestamp.hour / 24))
         feature_row["day_of_week"] = float(last_timestamp.dayofweek)
         feature_row["is_weekend"] = float(last_timestamp.dayofweek in {5, 6})
+        feature_row.update(self._meal_context_features(logs, last_timestamp, current))
         feature_row["patient_baseline_offset"] = 0.0
         feature_row["glucose_current"] = current
         return {name: float(feature_row.get(name, 0.0)) for name in self.feature_columns}
@@ -213,7 +251,11 @@ class GlucoseForecastService:
         last = ordered[-1] if ordered else {"glucose_mmol": 7.0}
         last_glucose = _as_mmol(float(last.get("glucose_mmol", last.get("glucose_level", 7.0))))
         # Conservative drifts avoid overconfident swings when no trained model output is available.
-        multipliers = {"60": 1.02, "120": 1.01, "180": 0.99, "240": 0.98}
+        multipliers = (
+            {"60": 1.01, "120": 1.00, "180": 0.99, "240": 0.98}
+            if last.get("is_fasting", True)
+            else {"60": 1.02, "120": 1.01, "180": 0.99, "240": 0.98}
+        )
         predictions = {horizon: round(last_glucose * multiplier, 2) for horizon, multiplier in multipliers.items()}
         confidence = {
             horizon: {"low": round(value - 1.5, 2), "high": round(value + 1.5, 2)}
@@ -248,8 +290,13 @@ class GlucoseForecastService:
         ordered = sorted(logs, key=lambda item: str(item.get("timestamp", "")))
         last = ordered[-1]
         last_glucose = _as_mmol(float(last.get("glucose_mmol", last.get("glucose_level", 7.0))))
+        last_is_fasting = bool(last.get("is_fasting", True))
+        drift_ratios = self.postprandial_drift_ratios
+        if last_is_fasting:
+            # Fasting readings should not inherit full post-meal CGMacros excursion drift.
+            drift_ratios = {"60": 1.01, "120": 1.00, "180": 0.99, "240": 0.98}
         predictions = {
-            str(horizon): round(last_glucose * self.postprandial_drift_ratios[str(horizon)], 2)
+            str(horizon): round(last_glucose * drift_ratios[str(horizon)], 2)
             for horizon in HORIZONS
         }
         confidence = {}

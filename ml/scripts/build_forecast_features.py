@@ -13,6 +13,13 @@ METADATA_PATH = PROCESSED_DIR / "forecast_feature_metadata.json"
 
 LAG_STEPS = [1, 2, 3, 4, 6, 8, 12]
 TARGET_HORIZONS = [60, 120, 180, 240]
+MEAL_CONTEXT_COLUMNS = [
+    "is_fasting",
+    "last_reading_is_post_meal",
+    "minutes_since_last_post_meal",
+    "recent_post_meal_readings_4h",
+    "post_meal_delta",
+]
 
 
 def _median_interval_minutes(df: pd.DataFrame) -> float:
@@ -40,6 +47,19 @@ def _build_patient_features(patient_df: pd.DataFrame, shifts: dict[str, int]) ->
     """Build lag, rate, rolling, time, context, and target features for one patient."""
     rows = patient_df.sort_values("timestamp").copy()
     glucose = rows["glucose_mmol"]
+    if "is_fasting" not in rows:
+        # IGLU has CGM timestamps but no meal labels, so this is only a weak overnight/morning proxy.
+        rows["is_fasting"] = rows["timestamp"].dt.hour.between(4, 10).astype(int)
+    rows["is_fasting"] = rows["is_fasting"].astype(float)
+    rows["last_reading_is_post_meal"] = 1.0 - rows["is_fasting"]
+    post_meal_time = rows["timestamp"].where(rows["last_reading_is_post_meal"] > 0.5).ffill()
+    rows["minutes_since_last_post_meal"] = (
+        rows["timestamp"].sub(post_meal_time).dt.total_seconds().div(60.0).fillna(720.0).clip(0, 720)
+    )
+    rows["recent_post_meal_readings_4h"] = rows["last_reading_is_post_meal"].rolling(48, min_periods=1).sum()
+    fasting_baseline = glucose.where(rows["is_fasting"] > 0.5).expanding(min_periods=1).mean().ffill()
+    # This approximates the current excursion above recent fasting-like baseline.
+    rows["post_meal_delta"] = (glucose - fasting_baseline).fillna(0.0)
     for lag in LAG_STEPS:
         rows[f"lag_{lag}"] = glucose.shift(lag)
     rows["roc_1"] = rows["glucose_mmol"] - rows["lag_1"]
@@ -90,6 +110,7 @@ def build_forecast_features() -> dict[str, object]:
         "time_of_day_cos",
         "day_of_week",
         "is_weekend",
+        *MEAL_CONTEXT_COLUMNS,
         "patient_baseline_offset",
         "glucose_current",
     ]
@@ -113,6 +134,8 @@ def build_forecast_features() -> dict[str, object]:
         "median_interval_minutes": median_interval,
         "n_patients": int(features["patient_id"].nunique()),
         "n_rows": int(len(features)),
+        "meal_context_columns": MEAL_CONTEXT_COLUMNS,
+        "meal_context_note": "Uses real is_fasting when present; otherwise derives a weak time-of-day proxy because IGLU has no meal labels.",
     }
     METADATA_PATH.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
     return metadata

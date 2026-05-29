@@ -134,7 +134,7 @@ def _rolling_mean(values: list[float], window: int) -> float:
 
 def _build_daily_monitoring_rows(logs: list) -> list[dict]:
     records: list[dict] = []
-    for log in sorted(logs, key=lambda item: item.log_date):
+    for log in sorted(logs, key=lambda item: (getattr(item, "created_at", None) or item.log_date, item.log_date)):
         glucose_values = [log.glucose_level] if log.glucose_level is not None else []
         if not glucose_values:
             continue
