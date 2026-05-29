@@ -6,6 +6,7 @@ import { Link } from "react-router-dom";
 import { api, RiskAssessment } from "../api/client";
 import { useAuth } from "../auth/auth";
 import { Badge, Card, EmptyState, ErrorState, FactorList, LoadingState, PageHeader } from "../components/ui";
+import { useI18n } from "../i18n";
 
 type FormValues = {
   age: number; sex: string; weight_kg: number; height_cm: number; high_bp: boolean; high_chol: boolean; smoker: boolean; phys_activity: boolean; family_history_diabetes: boolean; general_health: number;
@@ -18,12 +19,14 @@ type StepKey = "profile" | "clinical" | "lifestyle" | "results";
 function Stepper({
   steps,
   active,
+  bs,
 }: {
   steps: Array<{ key: StepKey; label: string }>;
   active: StepKey;
+  bs: boolean;
 }) {
   return (
-    <div className="stepper" aria-label="Risk check steps">
+    <div className="stepper" aria-label={bs ? "Koraci procjene rizika" : "Risk check steps"}>
       {steps.map((s, idx) => {
         const isActive = s.key === active;
         const isDone = steps.findIndex((x) => x.key === active) > idx;
@@ -51,14 +54,16 @@ export function RiskCheckFlow({
   onComplete?: () => void;
   userId?: number;
 }) {
+  const { language } = useI18n();
+  const bs = language === "bs";
   const steps = useMemo(
     () => [
-      { key: "profile" as const, label: "Profile" },
-      { key: "clinical" as const, label: "Clinical" },
-      { key: "lifestyle" as const, label: "Lifestyle" },
-      { key: "results" as const, label: "Results" },
+      { key: "profile" as const, label: bs ? "Profil" : "Profile" },
+      { key: "clinical" as const, label: bs ? "Klinički" : "Clinical" },
+      { key: "lifestyle" as const, label: bs ? "Životne navike" : "Lifestyle" },
+      { key: "results" as const, label: bs ? "Rezultati" : "Results" },
     ],
-    []
+    [bs]
   );
 
   const [step, setStep] = useState<StepKey>("profile");
@@ -107,13 +112,13 @@ export function RiskCheckFlow({
         <div className="wizard-header-row">
           <div>
             <strong className="wizard-heading">{steps[stepIndex]?.label}</strong>
-            <span className="wizard-meta">Step {stepIndex + 1} of {steps.length}</span>
+            <span className="wizard-meta">{bs ? `Korak ${stepIndex + 1} od ${steps.length}` : `Step ${stepIndex + 1} of ${steps.length}`}</span>
           </div>
-          <div className="wizard-progress" role="progressbar" aria-valuenow={progressPct} aria-valuemin={0} aria-valuemax={100} aria-label="Progress">
+          <div className="wizard-progress" role="progressbar" aria-valuenow={progressPct} aria-valuemin={0} aria-valuemax={100} aria-label={bs ? "Napredak" : "Progress"}>
             <i style={{ width: `${progressPct}%` }} />
           </div>
         </div>
-        <Stepper steps={steps} active={step} />
+        <Stepper steps={steps} active={step} bs={bs} />
       </div>
 
       <form
@@ -121,29 +126,29 @@ export function RiskCheckFlow({
         onSubmit={handleSubmit((values) => mutation.mutate(values))}
       >
         {step === "profile" && (
-          <Card title="Profile" action={<UserRound size={18} />}>
-            <label>Patient Age<input type="number" {...register("age", { valueAsNumber: true })} /></label>
-            <label>Biological Sex<select {...register("sex")}><option>Female</option><option>Male</option></select></label>
-            <label>Weight (kg)<input type="number" step="0.1" {...register("weight_kg", { valueAsNumber: true })} /></label>
-            <label>Height (cm)<input type="number" step="0.1" {...register("height_cm", { valueAsNumber: true })} /></label>
+          <Card title={bs ? "Profil" : "Profile"} action={<UserRound size={18} />}>
+            <label>{bs ? "Godine pacijenta" : "Patient Age"}<input type="number" {...register("age", { valueAsNumber: true })} /></label>
+            <label>{bs ? "Biološki spol" : "Biological Sex"}<select {...register("sex")}><option>{bs ? "Ženski" : "Female"}</option><option>{bs ? "Muški" : "Male"}</option></select></label>
+            <label>{bs ? "Težina (kg)" : "Weight (kg)"}<input type="number" step="0.1" {...register("weight_kg", { valueAsNumber: true })} /></label>
+            <label>{bs ? "Visina (cm)" : "Height (cm)"}<input type="number" step="0.1" {...register("height_cm", { valueAsNumber: true })} /></label>
           </Card>
         )}
 
         {step === "clinical" && (
-          <Card title="Clinical Markers" action={<Beaker size={18} />}>
-            <label className="check"><input type="checkbox" {...register("high_bp")} /> Hypertension</label>
-            <label className="check"><input type="checkbox" {...register("high_chol")} /> High cholesterol</label>
-            <label className="check"><input type="checkbox" {...register("family_history_diabetes")} /> Family diabetes history</label>
-            <label>General Health<select {...register("general_health", { valueAsNumber: true })}><option value={1}>Excellent</option><option value={2}>Very good</option><option value={3}>Good</option><option value={4}>Fair</option><option value={5}>Poor</option></select></label>
+          <Card title={bs ? "Klinički markeri" : "Clinical Markers"} action={<Beaker size={18} />}>
+            <label className="check"><input type="checkbox" {...register("high_bp")} /> {bs ? "Hipertenzija" : "Hypertension"}</label>
+            <label className="check"><input type="checkbox" {...register("high_chol")} /> {bs ? "Visok holesterol" : "High cholesterol"}</label>
+            <label className="check"><input type="checkbox" {...register("family_history_diabetes")} /> {bs ? "Porodična historija dijabetesa" : "Family diabetes history"}</label>
+            <label>{bs ? "Opšte zdravlje" : "General Health"}<select {...register("general_health", { valueAsNumber: true })}><option value={1}>{bs ? "Odlično" : "Excellent"}</option><option value={2}>{bs ? "Vrlo dobro" : "Very good"}</option><option value={3}>{bs ? "Dobro" : "Good"}</option><option value={4}>{bs ? "Zadovoljavajuće" : "Fair"}</option><option value={5}>{bs ? "Loše" : "Poor"}</option></select></label>
           </Card>
         )}
 
         {step === "lifestyle" && (
-          <Card title="Lifestyle" action={<Activity size={18} />}>
-            <label className="check"><input type="checkbox" {...register("smoker")} /> Current smoker</label>
-            <label className="check"><input type="checkbox" {...register("phys_activity")} /> Physically active</label>
+          <Card title={bs ? "Životne navike" : "Lifestyle"} action={<Activity size={18} />}>
+            <label className="check"><input type="checkbox" {...register("smoker")} /> {bs ? "Trenutni pušač" : "Current smoker"}</label>
+            <label className="check"><input type="checkbox" {...register("phys_activity")} /> {bs ? "Fizički aktivan" : "Physically active"}</label>
             <div className="wizard-note">
-              This will run a baseline risk estimate from the profile you entered.
+              {bs ? "Ovo će pokrenuti početnu procjenu rizika na osnovu profila koji ste unijeli." : "This will run a baseline risk estimate from the profile you entered."}
             </div>
           </Card>
         )}
@@ -156,12 +161,12 @@ export function RiskCheckFlow({
               disabled={!canGoBack || mutation.isPending}
               onClick={() => prevStep && setStep(prevStep)}
             >
-              Back
+              {bs ? "Nazad" : "Back"}
             </button>
 
             {step === "lifestyle" ? (
               <button className="primary" type="submit" disabled={mutation.isPending}>
-                {mutation.isPending ? "Running..." : variant === "app" ? "Run Assessment" : "Run Risk Check"}
+                {mutation.isPending ? (bs ? "Pokretanje..." : "Running...") : variant === "app" ? (bs ? "Pokreni procjenu" : "Run Assessment") : (bs ? "Pokreni provjeru rizika" : "Run Risk Check")}
               </button>
             ) : (
               <button
@@ -170,7 +175,7 @@ export function RiskCheckFlow({
                 disabled={!nextStep || mutation.isPending}
                 onClick={() => nextStep && setStep(nextStep)}
               >
-                Next
+                {bs ? "Dalje" : "Next"}
               </button>
             )}
           </div>
@@ -180,55 +185,55 @@ export function RiskCheckFlow({
           <>
             <div className="wizard-results">
               <div className="wizard-results-main">
-                <Card title="Calculated Probability">
+                <Card title={bs ? "Izračunata vjerovatnoća" : "Calculated Probability"}>
                   {mutation.isPending ? (
-                    <LoadingState label="Running assessment" />
+                    <LoadingState label={bs ? "Procjena se pokreće" : "Running assessment"} />
                   ) : (
                     <>
                       <div className="probability">
                         <strong>{result ? Math.round(result.risk_probability * 100) : 32}<span>%</span></strong>
-                        <Badge tone={result?.risk_level === "high" ? "danger" : result?.risk_level === "low" ? "good" : "warning"}>{result?.risk_level ?? "Elevated"} risk profile</Badge>
+                        <Badge tone={result?.risk_level === "high" ? "danger" : result?.risk_level === "low" ? "good" : "warning"}>{result?.risk_level ?? (bs ? "Povišen" : "Elevated")} {bs ? "profil rizika" : "risk profile"}</Badge>
                       </div>
                       <div className="risk-bar"><i style={{ width: `${Math.round((result?.risk_probability ?? 0.32) * 100)}%` }} /></div>
-                      <p>{result?.explanation ?? "The submitted profile will be assessed for risk-support patterns after running the assessment."}</p>
+                      <p>{result?.explanation ?? (bs ? "Poslani profil će biti procijenjen na obrasce koji podržavaju procjenu rizika nakon pokretanja analize." : "The submitted profile will be assessed for risk-support patterns after running the assessment.")}</p>
                       {result?.model_version && <div className="chip-row"><Badge>{result.model_version}</Badge><Badge>{result.confidence_label}</Badge></div>}
                     </>
                   )}
-                  {mutation.isError && <ErrorState title="Assessment unavailable" body={mutation.error.message || "The API did not return a valid risk assessment."} />}
+                  {mutation.isError && <ErrorState title={bs ? "Procjena nije dostupna" : "Assessment unavailable"} body={mutation.error.message || (bs ? "API nije vratio ispravnu procjenu rizika." : "The API did not return a valid risk assessment.")} />}
                 </Card>
 
-                <Card title="Primary Contributing Factors">
-                  {result ? <FactorList items={result.top_factors} /> : <EmptyState title="Run the assessment" body="The factor ranking and interpretation will appear here after submission." />}
+                <Card title={bs ? "Glavni faktori" : "Primary Contributing Factors"}>
+                  {result ? <FactorList items={result.top_factors} /> : <EmptyState title={bs ? "Pokrenite procjenu" : "Run the assessment"} body={bs ? "Rangiranje faktora i interpretacija pojavit će se ovdje nakon slanja." : "The factor ranking and interpretation will appear here after submission."} />}
                 </Card>
               </div>
 
               <div className="wizard-results-side">
-                <Card title="Related Health Indicators">
-                  {result?.related_flags.length ? <div className="alert-list">{result.related_flags.map((flag) => <div key={flag.label} className={flag.level}><strong>{flag.label}</strong><span>{flag.detail}</span></div>)}</div> : <EmptyState title="No related flags yet" body="Related health indicators will appear here when the profile triggers them." />}
+                <Card title={bs ? "Povezani zdravstveni indikatori" : "Related Health Indicators"}>
+                  {result?.related_flags.length ? <div className="alert-list">{result.related_flags.map((flag) => <div key={flag.label} className={flag.level}><strong>{flag.label}</strong><span>{flag.detail}</span></div>)}</div> : <EmptyState title={bs ? "Još nema povezanih oznaka" : "No related flags yet"} body={bs ? "Povezani zdravstveni indikatori će se pojaviti ovdje kada ih profil pokrene." : "Related health indicators will appear here when the profile triggers them."} />}
                 </Card>
 
                 {variant === "app" && (
-                  <Card title="Clinical Protocol Suggestion">
-                    <p>{result?.next_actions[0] ?? "Initiate consistent lifestyle tracking and consider clinician review if elevated indicators persist."}</p>
-                    <button className="secondary">Add to Care Plan</button>
+                  <Card title={bs ? "Prijedlog kliničkog protokola" : "Clinical Protocol Suggestion"}>
+                    <p>{result?.next_actions[0] ?? (bs ? "Uspostavite dosljedno praćenje životnih navika i razmotrite pregled kliničara ako povišeni indikatori potraju." : "Initiate consistent lifestyle tracking and consider clinician review if elevated indicators persist.")}</p>
+                    <button className="secondary">{bs ? "Dodaj u plan njege" : "Add to Care Plan"}</button>
                   </Card>
                 )}
 
                 {variant === "onboarding" && (
-                  <Card title="Continue">
-                    <p>Now you can start tracking logs and receiving insights.</p>
+                  <Card title={bs ? "Nastavi" : "Continue"}>
+                    <p>{bs ? "Sada možete početi s unosom zapisa i dobijati uvide." : "Now you can start tracking logs and receiving insights."}</p>
                     <button className="primary" type="button" disabled={!result} onClick={onComplete}>
-                      Continue to app
+                      {bs ? "Nastavi u aplikaciju" : "Continue to app"}
                     </button>
                   </Card>
                 )}
 
                 {variant === "demo" && result && (
-                  <Card title="Want more than a snapshot?">
-                    <p>Create an account to save your baseline, track changes over time, and unlock monitoring insights and reports.</p>
+                  <Card title={bs ? "Želite više od snimka stanja?" : "Want more than a snapshot?"}>
+                    <p>{bs ? "Kreirajte račun da sačuvate početno stanje, pratite promjene kroz vrijeme i otključate uvide o praćenju i izvještaje." : "Create an account to save your baseline, track changes over time, and unlock monitoring insights and reports."}</p>
                     <div className="cta-row">
-                      <Link className="primary button-link" to="/register">Create account</Link>
-                      <Link className="secondary button-link" to="/login">Sign in</Link>
+                      <Link className="primary button-link" to="/register">{bs ? "Kreiraj račun" : "Create account"}</Link>
+                      <Link className="secondary button-link" to="/login">{bs ? "Prijava" : "Sign in"}</Link>
                     </div>
                   </Card>
                 )}
@@ -237,10 +242,10 @@ export function RiskCheckFlow({
 
             <div className="wizard-nav">
               <button type="button" className="secondary" onClick={() => setStep("lifestyle")}>
-                Edit inputs
+                {bs ? "Uredi unos" : "Edit inputs"}
               </button>
               <button type="button" className="primary" onClick={() => setStep("profile")}>
-                Start over
+                {bs ? "Kreni ispočetka" : "Start over"}
               </button>
             </div>
           </>
@@ -252,10 +257,12 @@ export function RiskCheckFlow({
 
 export function RiskCheck() {
   const auth = useAuth();
+  const { language } = useI18n();
+  const bs = language === "bs";
 
   return (
     <div className="page narrow">
-      <PageHeader title="Patient Risk Assessment" subtitle="Complete the clinical matrix below to calculate the current Type 2 diabetes risk profile." />
+      <PageHeader title={bs ? "Procjena rizika pacijenta" : "Patient Risk Assessment"} subtitle={bs ? "Popunite kliničku matricu ispod da izračunate trenutni profil rizika za dijabetes tipa 2." : "Complete the clinical matrix below to calculate the current Type 2 diabetes risk profile."} />
       <RiskCheckFlow variant="app" userId={auth.session?.userId ?? 1} />
     </div>
   );

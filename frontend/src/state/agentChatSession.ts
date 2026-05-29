@@ -16,7 +16,9 @@ type AgentChatState = {
 const STORAGE_KEY = "glyco.agentChatSession.v1";
 const initialAssistant: AgentChatMessage = {
   role: "assistant",
-  content: "Ask Glyco about this week's risk, monitoring changes, doctor questions, or family support. The agent will use your profile, logs, model results, and curated guidance notes.",
+  content: (typeof navigator !== "undefined" && navigator.language && navigator.language.toLowerCase().startsWith("bs"))
+    ? "Pitajte Glyco o riziku ove sedmice, promjenama u praćenju, pitanjima za doktora ili podršci porodice. Agent će koristiti vaš profil, očitanja, rezultate modela i kurirane smjernice."
+    : "Ask Glyco about this week's risk, monitoring changes, doctor questions, or family support. The agent will use your profile, logs, model results, and curated guidance notes.",
   created_at: new Date().toISOString(),
 };
 

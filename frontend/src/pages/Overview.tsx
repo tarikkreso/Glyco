@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { useAuth } from "../auth/auth";
 import { Badge, ErrorState, LoadingState } from "../components/ui";
+import { useI18n } from "../i18n";
 import { appendAgentAssistantMessage, appendAgentUserMessage, setAgentDraft, useAgentChatSession } from "../state/agentChatSession";
 
 type Feeling = "good" | "low" | "elevated" | "no-data";
@@ -51,6 +52,19 @@ function glycoCopy(state: string) {
   }
 }
 
+function localizeThompsonAction(title?: string, bs?: boolean) {
+  if (!title || !bs) return title;
+  const labels: Record<string, string> = {
+    "Keep glucose logging consistent": "Unosite glukozu dosljedno",
+    "Walk after the largest meal": "Prošetajte nakon najvećeg obroka",
+    "Pair carbohydrates with protein or fiber": "Uparite ugljikohidrate s proteinima ili vlaknima",
+    "Open glucose log": "Otvori unos glukoze",
+    "Add current glucose reading": "Dodajte trenutno očitanje glukoze",
+    "Review post-meal patterns": "Pregledajte obrasce nakon obroka",
+  };
+  return labels[title] ?? title;
+}
+
 function GlycoAvatar({ state }: { state: string }) {
   return (
     <div className={`glyco-avatar-large glyco-${state}`} aria-hidden="true">
@@ -73,6 +87,7 @@ function buildUsefulInsight({
   daysSinceLastLog,
   thompsonTitle,
   thompsonType,
+  bs,
 }: {
   current?: number;
   previousAverage?: number;
@@ -83,69 +98,101 @@ function buildUsefulInsight({
   daysSinceLastLog?: number;
   thompsonTitle?: string;
   thompsonType?: string;
+  bs?: boolean;
 }) {
+  const useBs = bs ?? false;
   const delta = current && previousAverage ? current - previousAverage : 0;
   const hasSymptoms = selectedSymptoms.length > 0 || feeling === "low" || feeling === "elevated";
-  const symptomText = selectedSymptoms.length ? selectedSymptoms.join(", ").toLowerCase() : feeling === "low" ? "low/tired" : "off";
+  const symptomText = selectedSymptoms.length
+    ? selectedSymptoms.join(", ").toLowerCase()
+    : feeling === "low"
+      ? (useBs ? "nisko/umorno" : "low/tired")
+      : (useBs ? "izvan uobičajenog" : "off");
   const readingIsStale = daysSinceLastLog === undefined || daysSinceLastLog >= 1;
   if (hasSymptoms && readingIsStale) {
     return {
-      title: "Measure glucose now and add the reading",
+      title: useBs ? "Izmjerite glukozu sada i dodajte očitanje" : "Measure glucose now and add the reading",
       reason: daysSinceLastLog === undefined
-        ? `You marked ${symptomText}, and Glyco does not see a recent glucose reading to compare against.`
-        : `You marked ${symptomText}, and the last glucose log is ${daysSinceLastLog} day(s) old.`,
-      action: "Open glucose log",
-      source: "Changed by symptom check-in + stale reading",
-      adaptation: "Symptom safety overrides Thompson ranking until Glyco has a fresh glucose value.",
+        ? (useBs
+          ? `Zabilježili ste ${symptomText}, a Glyco ne vidi skoro očitanje glukoze za poređenje.`
+          : `You marked ${symptomText}, and Glyco does not see a recent glucose reading to compare against.`)
+        : (useBs
+          ? `Zabilježili ste ${symptomText}, a posljednji zapis glukoze je star ${daysSinceLastLog} dan(a).`
+          : `You marked ${symptomText}, and the last glucose log is ${daysSinceLastLog} day(s) old.`),
+      action: useBs ? "Otvori unos glukoze" : "Open glucose log",
+      source: useBs ? "Promijenjeno zbog prijave simptoma i zastarjelog očitanja" : "Changed by symptom check-in + stale reading",
+      adaptation: useBs ? "Sigurnost zbog simptoma ima prednost nad Thompson rangiranjem dok Glyco ne dobije svježu vrijednost glukoze." : "Symptom safety overrides Thompson ranking until Glyco has a fresh glucose value.",
     };
   }
   if (hasSymptoms && feeling === "low") {
     return {
-      title: "Check glucose before following any other recommendation",
-      reason: `You marked low/tired. Glyco needs a current reading before it can tell whether this is a low, normal, or elevated pattern.`,
-      action: "Add current glucose reading",
-      source: "Changed by low/tired check-in",
-      adaptation: "The agent prioritizes immediate monitoring when symptoms are reported.",
+      title: useBs ? "Provjerite glukozu prije bilo koje druge preporuke" : "Check glucose before following any other recommendation",
+      reason: useBs
+        ? "Označili ste nisko/umorno. Glyco treba trenutno očitanje prije nego kaže da li je obrazac nizak, normalan ili povišen."
+        : `You marked low/tired. Glyco needs a current reading before it can tell whether this is a low, normal, or elevated pattern.`,
+      action: useBs ? "Dodajte trenutno očitanje glukoze" : "Add current glucose reading",
+      source: useBs ? "Promijenjeno zbog prijave nisko/umorno" : "Changed by low/tired check-in",
+      adaptation: useBs ? "Agent daje prednost trenutnom praćenju kada su simptomi prijavljeni." : "The agent prioritizes immediate monitoring when symptoms are reported.",
     };
   }
   if (hasSymptoms && current && current >= 140) {
     return {
-      title: "Log one more reading and review the last meal",
-      reason: `Today is ${current} mg/dL, about ${Math.round(delta)} mg/dL above your recent average, and you marked ${symptomText}.`,
-      action: thompsonTitle ?? "Pair carbohydrates with protein or fiber",
-      source: "Changed by symptoms + current glucose",
-      adaptation: thompsonTitle ? `Then Glyco falls back to the Thompson-ranked ${thompsonType ?? "recommendation"} action.` : "No feedback-ranked action is available yet.",
+      title: useBs ? "Unesite još jedno očitanje i pregledajte posljednji obrok" : "Log one more reading and review the last meal",
+      reason: useBs
+        ? `Danas je ${current} mg/dL, oko ${Math.round(delta)} mg/dL iznad vašeg nedavnog prosjeka, a označili ste ${symptomText}.`
+        : `Today is ${current} mg/dL, about ${Math.round(delta)} mg/dL above your recent average, and you marked ${symptomText}.`,
+      action: localizeThompsonAction(thompsonTitle, useBs) ?? (useBs ? "Uparite ugljikohidrate s proteinima ili vlaknima" : "Pair carbohydrates with protein or fiber"),
+      source: useBs ? "Promijenjeno zbog simptoma i trenutne glukoze" : "Changed by symptoms + current glucose",
+      adaptation: thompsonTitle
+        ? (useBs
+          ? `Zatim Glyco pada na Thompson-rangiranu akciju ${thompsonType ?? "preporuke"}.`
+          : `Then Glyco falls back to the Thompson-ranked ${thompsonType ?? "recommendation"} action.`)
+        : (useBs ? "Još nema dostupne akcije rangirane na osnovu povratne informacije." : "No feedback-ranked action is available yet."),
     };
   }
   if (trend === "concerning" || riskLevel === "high") {
     return {
-      title: "Treat this week as a watch period",
-      reason: "Your trained models are showing higher risk or a concerning glucose trend, so the useful next step is consistency, not panic.",
-      action: thompsonTitle ?? "Keep glucose logging consistent",
-      source: thompsonTitle ? "Changed by trained models + Thompson ranking" : "Changed by trained models",
-      adaptation: thompsonTitle ? `The next action comes from the ${thompsonType ?? "current"} Thompson arm and can change after feedback.` : "The recommendation will personalize after feedback.",
+      title: useBs ? "Posmatrajte ovu sedmicu kao period praćenja" : "Treat this week as a watch period",
+      reason: useBs
+        ? "Vaši trenirani modeli pokazuju veći rizik ili zabrinjavajući trend glukoze, pa je koristan sljedeći korak dosljednost, a ne panika."
+        : "Your trained models are showing higher risk or a concerning glucose trend, so the useful next step is consistency, not panic.",
+      action: localizeThompsonAction(thompsonTitle, useBs) ?? (useBs ? "Unosite glukozu dosljedno" : "Keep glucose logging consistent"),
+      source: thompsonTitle ? (useBs ? "Promijenjeno zbog treniranih modela i Thompson rangiranja" : "Changed by trained models + Thompson ranking") : (useBs ? "Promijenjeno zbog treniranih modela" : "Changed by trained models"),
+      adaptation: thompsonTitle
+        ? (useBs
+          ? `Sljedeća akcija dolazi iz Thompson kruga ${thompsonType ?? "trenutnog"} i može se promijeniti nakon povratne informacije.`
+          : `The next action comes from the ${thompsonType ?? "current"} Thompson arm and can change after feedback.`)
+        : (useBs ? "Preporuka će se personalizovati nakon povratne informacije." : "The recommendation will personalize after feedback."),
     };
   }
   if (current && previousAverage && delta >= 15) {
     return {
-      title: "Check what changed today",
-      reason: `This reading is ${Math.round(delta)} mg/dL above your recent average, which is enough to look for a meal, stress, sleep, or activity trigger.`,
-      action: thompsonTitle ?? "Walk after the largest meal",
-      source: "Changed by glucose delta",
-      adaptation: thompsonTitle ? "The action text is still ranked by feedback learning." : "Glyco is using default guidance until feedback exists.",
+      title: useBs ? "Provjerite šta se danas promijenilo" : "Check what changed today",
+      reason: useBs
+        ? `Ovo očitanje je ${Math.round(delta)} mg/dL iznad vašeg nedavnog prosjeka, što je dovoljno da potražite okidač u obroku, stresu, snu ili aktivnosti.`
+        : `This reading is ${Math.round(delta)} mg/dL above your recent average, which is enough to look for a meal, stress, sleep, or activity trigger.`,
+      action: localizeThompsonAction(thompsonTitle, useBs) ?? (useBs ? "Prošetajte nakon najvećeg obroka" : "Walk after the largest meal"),
+      source: useBs ? "Promijenjeno zbog razlike glukoze" : "Changed by glucose delta",
+      adaptation: thompsonTitle ? (useBs ? "Tekst akcije i dalje rangira učenje povratne informacije." : "The action text is still ranked by feedback learning.") : (useBs ? "Glyco koristi zadane smjernice dok ne stigne povratna informacija." : "Glyco is using default guidance until feedback exists."),
     };
   }
   return {
-    title: "Keep the current pattern steady",
-    reason: "No urgent pattern is showing right now. The most useful thing is to keep the next glucose reading comparable.",
-    action: thompsonTitle ?? "Keep glucose logging consistent",
-    source: thompsonTitle ? "Changed by Thompson ranking" : "Default monitoring action",
-    adaptation: thompsonTitle ? `This is the current ${thompsonType ?? "ranked"} arm; marking answers useful/not useful changes future ranking.` : "Save feedback in chat to teach Glyco which action type works for you.",
+    title: useBs ? "Zadržite trenutni obrazac stabilnim" : "Keep the current pattern steady",
+    reason: useBs ? "Trenutno se ne vidi hitan obrazac. Najkorisnije je da sljedeće očitanje glukoze ostane uporedivo." : "No urgent pattern is showing right now. The most useful thing is to keep the next glucose reading comparable.",
+    action: localizeThompsonAction(thompsonTitle, useBs) ?? (useBs ? "Unosite glukozu dosljedno" : "Keep glucose logging consistent"),
+    source: thompsonTitle ? (useBs ? "Promijenjeno zbog Thompson rangiranja" : "Changed by Thompson ranking") : (useBs ? "Zadana akcija praćenja" : "Default monitoring action"),
+    adaptation: thompsonTitle
+      ? (useBs
+        ? `Ovo je trenutni ${thompsonType ?? "rangirani"} krug; označavanje odgovora korisnim / nekorisnim mijenja buduće rangiranje.`
+        : `This is the current ${thompsonType ?? "ranked"} arm; marking answers useful/not useful changes future ranking.`)
+      : (useBs ? "Sačuvajte povratnu informaciju u chatu da naučite Glyco koja vrsta akcije vam odgovara." : "Save feedback in chat to teach Glyco which action type works for you."),
   };
 }
 
 export function Overview() {
   const auth = useAuth();
+  const { t, language } = useI18n();
+  const bs = language === "bs";
   const userId = auth.session?.userId ?? 1;
   const navigate = useNavigate();
   const [feeling, setFeeling] = useState<Feeling | null>(null);
@@ -183,7 +230,37 @@ export function Overview() {
     riskLevel: risk.data?.risk_level,
     feeling: feeling ?? undefined,
   });
-  const avatarCopy = glycoCopy(glycoState);
+  const avatarCopy = (() => {
+    const copy = glycoCopy(glycoState);
+    if (!bs) return copy;
+    return {
+      ...copy,
+      title:
+        glycoState === "high"
+          ? "Uočen rizik"
+          : glycoState === "elevated"
+            ? "Blago povišeno"
+            : glycoState === "low"
+              ? "Signal niske energije"
+              : glycoState === "good"
+                ? "Dobar dan"
+                : glycoState === "no-data"
+                  ? "Čekamo podatke"
+                  : "Stabilna glukoza",
+      subtitle:
+        glycoState === "high"
+          ? "Topliji spoljašnji prsten znači da Glyco prati jači signal."
+          : glycoState === "elevated"
+            ? "Svjetliji centar pokazuje da se glukoza kreće iznad uobičajenog raspona."
+            : glycoState === "low"
+              ? "Hladnija jezgra odražava simptome niže energije ili slabiji obrazac glukoze."
+              : glycoState === "good"
+                ? "Veći i glatkiji sjaj znači da današnji obrazac izgleda mirno."
+                : glycoState === "no-data"
+                  ? "Glyco će zasvijetliti čim stignu očitanja i prijave stanja."
+                  : "Spora zelena animacija disanja znači da nema hitnog obrasca.",
+    };
+  })();
   const thompsonAction = insight.data?.learning_summary?.next_best_action;
   const usefulInsight = buildUsefulInsight({
     current: latestLog?.glucose_level,
@@ -195,6 +272,7 @@ export function Overview() {
     daysSinceLastLog,
     thompsonTitle: thompsonAction?.title,
     thompsonType: thompsonAction?.type,
+    bs,
   });
 
   const chat = useMutation({
@@ -203,7 +281,7 @@ export function Overview() {
       appendAgentAssistantMessage(response.answer, response);
     },
     onError: () => {
-      appendAgentAssistantMessage("I could not reach the agent service. Try again after the API is available.");
+      appendAgentAssistantMessage(t("agent.apiUnavailable"));
     },
   });
 
@@ -241,11 +319,11 @@ export function Overview() {
 
   return (
     <div className={`page glyco-home glyco-home-${glycoState} ${chatExpanding ? "chat-route-expanding" : ""}`}>
-      <section className="glyco-hero" aria-label="Glyco health overview">
+      <section className="glyco-hero" aria-label={bs ? "Glyco zdravstveni pregled" : "Glyco health overview"}>
         <div className="glyco-status-top">
           <div>
             <span>Glyco</span>
-            <h1>How are you feeling today?</h1>
+            <h1>{t("overview.howAreYou")}</h1>
           </div>
           <Badge tone={glycoState === "high" ? "warning" : glycoState === "stable" || glycoState === "good" ? "good" : "neutral"}>
             {avatarCopy.title}
@@ -253,29 +331,29 @@ export function Overview() {
         </div>
 
         {(risk.isError || monitoring.isError || logs.isError) && (
-          <ErrorState title="Some health signals are unavailable" body="Glyco can still accept a check-in, but live model data could not be loaded." />
+          <ErrorState title={bs ? "Neki zdravstveni signali nisu dostupni" : "Some health signals are unavailable"} body={bs ? "Glyco i dalje može primiti prijavu stanja, ali živi podaci modela nisu mogli biti učitani." : "Glyco can still accept a check-in, but live model data could not be loaded."} />
         )}
 
         <div className="glyco-orbit">
           <button type="button" className="metric-card glucose" onClick={() => navigate("/metric/glucose")}>
-            <span>Glucose Level</span>
+            <span>{bs ? "Nivo glukoze" : "Glucose Level"}</span>
             <strong>{latestLog?.glucose_level ?? "--"} <small>mg/dL</small></strong>
           </button>
           <button type="button" className="metric-card nutrition" onClick={() => navigate("/metric/nutrition")}>
-            <span>Nutrition</span>
-            <strong>{risk.data?.risk_level === "high" ? "Watch" : "Optimal"}</strong>
+            <span>{bs ? "Ishrana" : "Nutrition"}</span>
+            <strong>{risk.data?.risk_level === "high" ? (bs ? "Pratiti" : "Watch") : (bs ? "Optimalno" : "Optimal")}</strong>
           </button>
           <button type="button" className="metric-card hba1c" onClick={() => navigate("/metric/hba1c")}>
             <span>HbA1c</span>
             <strong>6.5 <small>%</small></strong>
           </button>
           <button type="button" className="metric-card risk-score" onClick={() => navigate("/metric/risk")}>
-            <span>Risk Score</span>
-            <strong>{risk.data?.risk_level ?? "Loading"}</strong>
+            <span>{bs ? "Rizik" : "Risk Score"}</span>
+            <strong>{risk.data?.risk_level ?? (bs ? "Učitavanje" : "Loading")}</strong>
           </button>
           <button type="button" className="metric-card activity" onClick={() => navigate("/metric/activity")}>
-            <span>Daily Activity</span>
-            <strong>{(latestLog?.activity_minutes ?? 0) >= 30 ? "Good" : "Low"}</strong>
+            <span>{bs ? "Dnevna aktivnost" : "Daily Activity"}</span>
+            <strong>{(latestLog?.activity_minutes ?? 0) >= 30 ? (bs ? "Dobro" : "Good") : (bs ? "Nisko" : "Low")}</strong>
           </button>
 
           <div className="glyco-center">
@@ -283,7 +361,7 @@ export function Overview() {
               type="button"
               className={`glyco-avatar-button ${avatarActivated ? "is-activated" : ""}`}
               onClick={activateAvatar}
-              aria-label={`Activate Glyco avatar. Current state: ${avatarCopy.title}`}
+              aria-label={bs ? `Aktiviraj Glyco avatar. Trenutno stanje: ${avatarCopy.title}` : `Activate Glyco avatar. Current state: ${avatarCopy.title}`}
             >
               <GlycoAvatar state={glycoState} />
             </button>
@@ -293,46 +371,48 @@ export function Overview() {
             </div>
           </div>
         </div>
-        <div className="agent-learning-strip" aria-label="Agent learning signals">
+        <div className="agent-learning-strip" aria-label={bs ? "Signali učenja agenta" : "Agent learning signals"}>
           <button type="button" onClick={() => navigate("/metric/bayesian")}>
-            <span>Bayesian Risk</span>
+            <span>{bs ? "Bajesovski rizik" : "Bayesian Risk"}</span>
             <strong>{bayesian.data ? `${Math.round(bayesian.data.posterior_mean * 100)}%` : "--"}</strong>
-            <small>{bayesian.data ? `${bayesian.data.number_of_updates} posterior updates` : "Waiting for posterior"}</small>
+            <small>{bayesian.data ? `${bayesian.data.number_of_updates} ${bs ? "ažuriranja posteriora" : "posterior updates"}` : (bs ? "Čekamo posterior" : "Waiting for posterior")}</small>
           </button>
           <button type="button" onClick={() => navigate("/metric/thompson")}>
-            <span>Thompson Ranker</span>
-            <strong>{thompsonAction?.type ?? "Learning"}</strong>
-            <small>{thompsonAction?.title ?? "Ranking next best action from feedback"}</small>
+            <span>{bs ? "Thompson rangiranje" : "Thompson Ranker"}</span>
+            <strong>{thompsonAction?.type ?? (bs ? "Učenje" : "Learning")}</strong>
+            <small>{thompsonAction?.title ?? (bs ? "Rangira sljedeću najbolju akciju prema povratnoj informaciji" : "Ranking next best action from feedback")}</small>
           </button>
         </div>
 
         <div className="checkin-panel">
           <div className="checkin-question">
             <Sparkles size={18} />
-            <span>Glyco asks</span>
-            <strong>How are you feeling today?</strong>
+            <span>{bs ? "Glyco pita" : "Glyco asks"}</span>
+            <strong>{bs ? "Kako se danas osjećate?" : "How are you feeling today?"}</strong>
           </div>
-          <div className="feeling-row" role="group" aria-label="Select how you feel">
-            <button className={feeling === "good" ? "active" : ""} type="button" onClick={() => setFeeling("good")}>Good</button>
-            <button className={feeling === "low" ? "active" : ""} type="button" onClick={() => setFeeling("low")}>Low / tired</button>
-            <button className={feeling === "elevated" ? "active" : ""} type="button" onClick={() => setFeeling("elevated")}>A bit off</button>
+          <div className="feeling-row" role="group" aria-label={bs ? "Odaberite kako se osjećate" : "Select how you feel"}>
+            <button className={feeling === "good" ? "active" : ""} type="button" onClick={() => setFeeling("good")}>{bs ? "Dobro" : "Good"}</button>
+            <button className={feeling === "low" ? "active" : ""} type="button" onClick={() => setFeeling("low")}>{bs ? "Nisko / umorno" : "Low / tired"}</button>
+            <button className={feeling === "elevated" ? "active" : ""} type="button" onClick={() => setFeeling("elevated")}>{bs ? "Pomalo loše" : "A bit off"}</button>
           </div>
-          <div className="symptom-row" role="group" aria-label="Select symptoms">
+          <div className="symptom-row" role="group" aria-label={bs ? "Odaberite simptome" : "Select symptoms"}>
             {symptoms.map((symptom) => (
               <button className={selectedSymptoms.includes(symptom) ? "active" : ""} key={symptom} type="button" onClick={() => toggleSymptom(symptom)}>
-                {symptom}
+                {bs ? ({ Fatigue: "Umor", Thirst: "Žeđ", Headache: "Glavobolja", Dizziness: "Vrtoglavica" } as Record<string, string>)[symptom] ?? symptom : symptom}
               </button>
             ))}
           </div>
         </div>
 
         <div className="today-insight">
-          <span>What Glyco recommends now</span>
+            <span>{bs ? "Šta Glyco sada preporučuje" : "What Glyco recommends now"}</span>
           <p>{usefulInsight.title}</p>
           <small>{usefulInsight.reason}</small>
           <div className="insight-action-row">
-            <strong>Next best action</strong>
-            <button type="button" onClick={() => navigate("/monitoring")}>{usefulInsight.action}</button>
+            <strong>{t("overview.nextBestAction")}</strong>
+            <button type="button" onClick={() => navigate("/monitoring")}>
+              {usefulInsight.action}
+            </button>
           </div>
           <div className="insight-adaptation-note">
             <span>{usefulInsight.source}</span>
@@ -350,24 +430,24 @@ export function Overview() {
             if (event.target.value.length > 0) setChatOpen(true);
           }}
           onFocus={() => setChatOpen(true)}
-          placeholder="Ask Glyco about this pattern..."
-          aria-label="Ask Glyco"
+          placeholder={bs ? "Pitajte Glyco o ovom obrascu..." : "Ask Glyco about this pattern..."}
+          aria-label={bs ? "Pitaj Glyco" : "Ask Glyco"}
         />
-        <button className="primary" type="submit" aria-label="Send message"><ArrowUp size={16} /></button>
+        <button className="primary" type="submit" aria-label={bs ? "Pošalji poruku" : "Send message"}><ArrowUp size={16} /></button>
       </form>
 
       {chatOpen && (
-        <aside className={`glyco-chat-window ${chatExpanding ? "route-expanding" : ""}`} aria-label="Glyco chat window">
+        <aside className={`glyco-chat-window ${chatExpanding ? "route-expanding" : ""}`} aria-label={bs ? "Glyco chat prozor" : "Glyco chat window"}>
           <header>
             <div>
-              <span>AI Chat</span>
+              <span>{bs ? "AI chat" : "AI Chat"}</span>
               <strong>Glyco</strong>
             </div>
             <div className="glyco-chat-actions">
-              <button type="button" className="icon-button" onClick={expandChat} aria-label="Open full Glyco chat">
+              <button type="button" className="icon-button" onClick={expandChat} aria-label={bs ? "Otvori puni Glyco chat" : "Open full Glyco chat"}>
                 <Maximize2 size={16} />
               </button>
-              <button type="button" className="icon-button" onClick={() => setChatOpen(false)} aria-label="Close chat">
+              <button type="button" className="icon-button" onClick={() => setChatOpen(false)} aria-label={bs ? "Zatvori chat" : "Close chat"}>
                 <X size={16} />
               </button>
             </div>
@@ -375,11 +455,11 @@ export function Overview() {
           <div ref={chatThreadRef} className="glyco-chat-thread" aria-live="polite">
             {chatSession.messages.map((message, index) => (
               <article className={`glyco-chat-message ${message.role}`} key={`${message.role}-${index}`}>
-                <span>{message.role === "assistant" ? "Glyco" : "You"}</span>
+                <span>{message.role === "assistant" ? "Glyco" : (bs ? "Vi" : "You")}</span>
                 <p>{message.content}</p>
               </article>
             ))}
-            {chat.isPending && <LoadingState label="Glyco is reading your trend and check-in" />}
+            {chat.isPending && <LoadingState label={bs ? "Glyco čita vaš trend i prijavu stanja" : "Glyco is reading your trend and check-in"} />}
           </div>
         </aside>
       )}

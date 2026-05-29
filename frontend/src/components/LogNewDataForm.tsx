@@ -2,16 +2,23 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api/client";
+import { useI18n } from "../i18n";
 import { ErrorState } from "./ui";
 import { useToast } from "./ui";
 
 export type LogNewDataValues = {
   glucose_level: number;
   is_fasting: "true" | "false";
+  reading_time: string;
 };
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
+}
+
+function datetimeLocalValue(date: Date) {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 function GlucoseWheel({
@@ -27,6 +34,7 @@ function GlucoseWheel({
   max?: number;
   step?: number;
 }) {
+  const { t } = useI18n();
   const itemHeight = 40;
   const values = useMemo(() => {
     const list: number[] = [];
@@ -58,7 +66,7 @@ function GlucoseWheel({
   }, [onChange, values]);
 
   return (
-    <div className="wheel-picker" aria-label="Glucose wheel picker">
+    <div className="wheel-picker" aria-label={t("log.glucoseWheel")}>
       <div className="wheel-window" aria-hidden="true" />
       <div className="wheel-scroller" ref={scrollerRef} onScroll={onScroll}>
         {values.map((v) => (
@@ -80,6 +88,7 @@ export function LogNewDataForm({
 }) {
   const queryClient = useQueryClient();
   const toast = useToast();
+  const { t } = useI18n();
 
   const GLUCOSE_MIN = 40;
   const GLUCOSE_MAX = 500;
@@ -88,6 +97,7 @@ export function LogNewDataForm({
   const [isFasting, setIsFasting] = useState(true);
   const [glucoseLevel, setGlucoseLevel] = useState(128);
   const [glucoseDraft, setGlucoseDraft] = useState("128");
+  const [readingTime, setReadingTime] = useState(() => datetimeLocalValue(new Date()));
 
   const setGlucoseCommitted = useCallback(
     (next: number) => {
@@ -104,6 +114,7 @@ export function LogNewDataForm({
         user_id: userId,
         glucose_level: values.glucose_level,
         is_fasting: values.is_fasting === "true",
+        reading_time: values.reading_time,
       }),
     onSuccess: () => {
       void Promise.all([
@@ -113,14 +124,16 @@ export function LogNewDataForm({
         queryClient.invalidateQueries({ queryKey: ["bayesian"] }),
         queryClient.invalidateQueries({ queryKey: ["insight"] }),
         queryClient.invalidateQueries({ queryKey: ["forecast"] }),
+        queryClient.invalidateQueries({ queryKey: ["forecast-accuracy"] }),
         queryClient.invalidateQueries({ queryKey: ["alerts"] }),
       ]);
       setStep("type");
       setGlucoseCommitted(128);
+      setReadingTime(datetimeLocalValue(new Date()));
       toast({
         tone: "success",
-        title: "Saved",
-        body: "Your glucose reading was added successfully.",
+        title: t("log.savedTitle"),
+        body: t("log.savedBody"),
       });
       onSuccess?.();
     },
@@ -137,6 +150,7 @@ export function LogNewDataForm({
     addLog.mutate({
       glucose_level: nextValue,
       is_fasting: isFasting ? "true" : "false",
+      reading_time: readingTime,
     });
   };
 
@@ -144,7 +158,7 @@ export function LogNewDataForm({
     <>
       {step === "type" ? (
         <div className="log-step">
-          <p className="log-step-title">What are you logging?</p>
+          <p className="log-step-title">{t("log.typeQuestion")}</p>
           <div className="choice-row">
             <button
               type="button"
@@ -154,7 +168,7 @@ export function LogNewDataForm({
                 setStep("value");
               }}
             >
-              Fasting
+              {t("log.fasting")}
             </button>
             <button
               type="button"
@@ -164,7 +178,7 @@ export function LogNewDataForm({
                 setStep("value");
               }}
             >
-              Not fasting
+              {t("log.notFasting")}
             </button>
           </div>
         </div>
@@ -177,20 +191,20 @@ export function LogNewDataForm({
           }}
         >
           <div className="log-type-row">
-            <span>Logging</span>
-            <strong>{isFasting ? "Fasting" : "Not fasting"}</strong>
+            <span>{t("log.logging")}</span>
+            <strong>{isFasting ? t("log.fasting") : t("log.notFasting")}</strong>
             <button type="button" className="secondary" onClick={() => setStep("type")}>
-              Change
+              {t("log.change")}
             </button>
           </div>
 
           <label className="span-all">
-            <span>Glucose level (mg/dL)</span>
+            <span>{t("log.glucoseLevel")}</span>
             <div className="number-input-row">
               <button
                 type="button"
                 className="icon-button"
-                aria-label="Increase glucose"
+                aria-label={t("log.increaseGlucose")}
                 onClick={() => setGlucoseCommitted(glucoseLevel + 1)}
               >
                 <ChevronUp size={18} aria-hidden="true" />
@@ -215,7 +229,7 @@ export function LogNewDataForm({
               <button
                 type="button"
                 className="icon-button"
-                aria-label="Decrease glucose"
+                aria-label={t("log.decreaseGlucose")}
                 onClick={() => setGlucoseCommitted(glucoseLevel - 1)}
               >
                 <ChevronDown size={18} aria-hidden="true" />
@@ -225,19 +239,29 @@ export function LogNewDataForm({
             <GlucoseWheel value={glucoseLevel} onChange={setGlucoseCommitted} />
           </label>
 
+          <label className="span-all">
+            <span>{t("log.readingTime")}</span>
+            <input
+              type="datetime-local"
+              value={readingTime}
+              max={datetimeLocalValue(new Date())}
+              onChange={(event) => setReadingTime(event.target.value)}
+            />
+          </label>
+
           <button className="primary span-all" type="submit">
-            {addLog.isPending ? "Saving..." : "Save Reading"}
+            {addLog.isPending ? t("log.saving") : t("log.save")}
           </button>
         </form>
       )}
 
       {addLog.isError && (
         <ErrorState
-          title="Reading could not be saved"
+          title={t("log.errorTitle")}
           body={
             addLog.error instanceof Error
               ? addLog.error.message
-              : "The monitoring API rejected the new entry. Please try again."
+              : t("log.errorBody")
           }
         />
       )}

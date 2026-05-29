@@ -50,6 +50,9 @@ button, input, select, textarea { font: inherit; }
 .sidebar-collapsed .sidebar a.active { box-shadow: inset 0 -3px 0 var(--primary); }
 main { min-width: 0; }
 .topbar { height: 66px; border-bottom: 1px solid rgba(222, 243, 226, .62); display: flex; align-items: center; justify-content: flex-end; gap: 14px; padding: 0 26px; background: rgba(255, 255, 255, .42); backdrop-filter: blur(20px); box-shadow: inset 0 1px 0 rgba(255,255,255,.7); }
+.topbar-actions { display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
+.language-switch { display: inline-flex; align-items: center; gap: 7px; margin: 0; color: var(--muted); font-size: 12px; font-weight: 800; }
+.language-switch select { height: 30px; min-width: 58px; padding: 0 8px; border-radius: 999px; font-size: 12px; font-weight: 900; }
 .topbar input { width: 266px; border: 1px solid var(--outline); border-radius: 7px; background: #fff; padding: 9px 12px; }
 .topbar input:focus, input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); border-color: var(--accent); }
 .avatar { width: 34px; height: 34px; border: 1px solid rgba(222, 243, 226, .72); border-radius: 999px; display: grid; place-items: center; font-size: 12px; color: var(--primary); background: rgba(255,255,255,.62); box-shadow: inset 0 1px 0 rgba(255,255,255,.76); }
@@ -1605,7 +1608,7 @@ button.metric-card {
   position: fixed;
   right: 24px;
   bottom: 24px;
-  z-index: 30;
+  z-index: 55;
   display: grid;
   gap: 12px;
   justify-items: end;
@@ -2065,6 +2068,35 @@ button.metric-card {
 .forecast-tooltip { display: grid; gap: 5px; border: 1px solid rgba(91, 115, 101, .16); border-radius: 8px; padding: 9px 10px; background: rgba(255,255,255,.95); box-shadow: var(--shadow); color: var(--text); font-size: 12px; }
 .forecast-tooltip strong { color: var(--primary); font-size: 12px; }
 .forecast-tooltip span { color: var(--muted); }
+.forecast-quality-panel {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.forecast-quality-panel > div {
+  border: 1px solid rgba(91, 115, 101, .14);
+  border-radius: 8px;
+  padding: 10px;
+  background: rgba(255,255,255,.48);
+  min-width: 0;
+}
+
+.forecast-quality-panel span,
+.forecast-quality-panel small {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.forecast-quality-panel strong {
+  display: block;
+  margin: 4px 0 2px;
+  color: var(--primary);
+  font: 900 16px/1.15 Manrope, Inter, sans-serif;
+  overflow-wrap: anywhere;
+}
 
 .reading-history {
   display: grid;
@@ -2597,6 +2629,9 @@ button.metric-card {
   .profile-form-grid .span-2 {
     grid-column: auto;
   }
+  .forecast-quality-panel {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
   .topbar-account span {
     display: none;
   }
@@ -2617,6 +2652,7 @@ button.metric-card {
   .care-plan-signal-board { grid-template-columns: 1fr; }
   .meal-plan-card { min-height: 136px; }
   .monitoring-hero-stats, .model-evidence-list { grid-template-columns: 1fr; }
+  .forecast-quality-panel { grid-template-columns: 1fr; }
   .metric-detail-hero { grid-template-columns: 1fr; padding: 18px; }
   .metric-detail-hero strong { font-size: 32px; }
   .insight-grid { grid-template-columns: 1fr; }

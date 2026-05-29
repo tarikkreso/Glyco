@@ -5,6 +5,7 @@ import { useAuth } from "../auth/auth";
 import { api } from "../api/client";
 import { Card, EmptyState, LoadingState, useToast } from "./ui";
 import { LogNewDataForm } from "./LogNewDataForm";
+import { useI18n } from "../i18n";
 
 type SwipeGestureState = {
   alertId: number;
@@ -22,6 +23,8 @@ export function GlobalQuickActions() {
   const userId = auth.session?.userId ?? 1;
   const queryClient = useQueryClient();
   const toast = useToast();
+  const { t, language } = useI18n();
+  const bs = language === "bs";
 
   const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
 
@@ -60,13 +63,13 @@ export function GlobalQuickActions() {
     mutationFn: (alertId: number) => api.acknowledgeAlert(alertId, userId),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["alerts"] });
-      toast({ tone: "success", title: "Alert dismissed" });
+      toast({ tone: "success", title: bs ? "Upozorenje zatvoreno" : t("log.alerts") });
     },
     onError: (error) => {
       toast({
         tone: "error",
-        title: "Could not dismiss alert",
-        body: error instanceof Error ? error.message : "Please try again.",
+        title: bs ? "Upozorenje nije moguće zatvoriti" : "Could not dismiss alert",
+        body: error instanceof Error ? error.message : (bs ? "Pokušajte ponovo." : "Please try again."),
       });
     },
   });
@@ -75,13 +78,13 @@ export function GlobalQuickActions() {
     mutationFn: (alertId: number) => api.deleteAlert(alertId, userId),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["alerts"] });
-      toast({ tone: "success", title: "Alert deleted" });
+      toast({ tone: "success", title: bs ? "Upozorenje obrisano" : "Alert deleted" });
     },
     onError: (error) => {
       toast({
         tone: "error",
-        title: "Could not delete alert",
-        body: error instanceof Error ? error.message : "Please try again.",
+        title: bs ? "Upozorenje nije moguće obrisati" : "Could not delete alert",
+        body: error instanceof Error ? error.message : (bs ? "Pokušajte ponovo." : "Please try again."),
       });
     },
   });
@@ -178,10 +181,10 @@ export function GlobalQuickActions() {
             setLogOpen(false);
             setAlertsOpen(true);
           }}
-          aria-label={activeAlertCount ? `View alerts (${activeAlertCount} active)` : "View alerts"}
+          aria-label={activeAlertCount ? t("alerts.viewWithCount").replace("%d", String(activeAlertCount)) : t("alerts.view")}
         >
           <Bell size={18} aria-hidden="true" />
-          <span className="log-fab-label">Alerts</span>
+          <span className="log-fab-label">{t("log.alerts")}</span>
           {activeAlertCount ? <span className="fab-count" aria-hidden="true">{activeAlertCount}</span> : null}
         </button>
 
@@ -192,10 +195,10 @@ export function GlobalQuickActions() {
             setAlertsOpen(false);
             setLogOpen(true);
           }}
-          aria-label="Log new health data"
+          aria-label={t("alerts.logNewData")}
         >
           <Plus size={18} aria-hidden="true" />
-          <span className="log-fab-label">Log data</span>
+          <span className="log-fab-label">{t("log.fab")}</span>
         </button>
       </div>
 
@@ -204,32 +207,32 @@ export function GlobalQuickActions() {
           className="log-panel-overlay alerts-overlay"
           role="dialog"
           aria-modal="true"
-          aria-label="Alerts"
+          aria-label={t("alerts.title")}
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) setAlertsOpen(false);
           }}
         >
           <div className="log-panel alerts-panel" onMouseDown={(event) => event.stopPropagation()}>
             <Card
-              title="Alerts"
+              title={t("log.alerts")}
               action={
                 <button
                   type="button"
                   className="icon-button"
                   onClick={() => setAlertsOpen(false)}
-                  aria-label="Close alerts"
+                  aria-label={bs ? "Zatvori upozorenja" : "Close alerts"}
                 >
                   <X size={18} aria-hidden="true" />
                 </button>
               }
             >
-              <p className="log-panel-meta">Anomaly notices and agent alerts based on your recent glucose logs.</p>
+              <p className="log-panel-meta">{t("alerts.anomalyNotice")}</p>
 
               <div className="alerts-panel-grid">
                 <section className="alerts-panel-section">
-                  <strong>Anomaly Notices</strong>
+                  <strong>{t("alerts.anomalyTitle")}</strong>
                   {monitoring.isLoading ? (
-                    <LoadingState label="Loading anomaly flags" />
+                    <LoadingState label={t("alerts.loadingAnomalies")} />
                   ) : monitoring.data?.anomaly_flags.length ? (
                     <div className="alert-list">
                       {monitoring.data.anomaly_flags.map((flag) => (
@@ -241,16 +244,16 @@ export function GlobalQuickActions() {
                     </div>
                   ) : (
                     <EmptyState
-                      title="No anomaly notices"
-                      body="Recent glucose logs do not currently show a flagged anomaly pattern."
+                      title={t("alerts.noAnomalies")}
+                      body={t("alerts.noAnomaliesBody")}
                     />
                   )}
                 </section>
 
                 <section className="alerts-panel-section">
-                  <strong>Agent Alerts</strong>
+                  <strong>{t("alerts.agentAlertsTitle")}</strong>
                   {alerts.isLoading ? (
-                    <LoadingState label="Loading proactive alerts" />
+                    <LoadingState label={t("alerts.loadingProactive")} />
                   ) : activeAlerts.length ? (
                     <div className="alert-list">
                       {activeAlerts.map((alert) => (
@@ -274,17 +277,17 @@ export function GlobalQuickActions() {
                                 type="button"
                                 onClick={() => acknowledgeAlert.mutate(alert.id)}
                                 disabled={acknowledgeAlert.isPending || deleteAlert.isPending}
-                                aria-label={`Dismiss alert: ${alert.title}`}
+                                aria-label={`${t("alerts.dismiss")}: ${alert.title}`}
                               >
-                                Dismiss
+                                {t("alerts.dismiss")}
                               </button>
                               <button
                                 type="button"
                                 onClick={() => deleteAlert.mutate(alert.id)}
                                 disabled={acknowledgeAlert.isPending || deleteAlert.isPending}
-                                aria-label={`Delete alert: ${alert.title}`}
+                                aria-label={`${t("alerts.delete")}: ${alert.title}`}
                               >
-                                Delete
+                                {t("alerts.delete")}
                               </button>
                             </div>
                           </div>
@@ -296,8 +299,8 @@ export function GlobalQuickActions() {
                     </div>
                   ) : (
                     <EmptyState
-                      title="No active alerts"
-                      body="After a new log, the agent creates an alert when the trend shifts into watch or concerning."
+                      title={t("alerts.noActiveTitle")}
+                      body={t("alerts.noActiveBody")}
                     />
                   )}
                 </section>
@@ -312,26 +315,26 @@ export function GlobalQuickActions() {
           className="log-panel-overlay"
           role="dialog"
           aria-modal="true"
-          aria-label="Log new data"
+          aria-label={t("log.newDataDialog")}
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) setLogOpen(false);
           }}
         >
           <div className="log-panel" onMouseDown={(event) => event.stopPropagation()}>
             <Card
-              title="Log New Data"
+              title={t("log.title")}
               action={
                 <button
                   type="button"
                   className="icon-button"
                   onClick={() => setLogOpen(false)}
-                  aria-label="Close log form"
+                  aria-label={t("log.closeForm")}
                 >
                   <X size={18} aria-hidden="true" />
                 </button>
               }
             >
-              <p className="log-panel-meta">Quick glucose entry for {today}. Date and time are recorded automatically.</p>
+              <p className="log-panel-meta">{t("log.meta").replace("today", today)}</p>
               <LogNewDataForm userId={userId} onSuccess={() => setLogOpen(false)} />
             </Card>
           </div>

@@ -2,9 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import { Plus, X } from "lucide-react";
 import { Card } from "./ui";
 import { LogNewDataForm } from "./LogNewDataForm";
+import { useI18n } from "../i18n";
 
 export function GlobalLogNewData() {
   const [open, setOpen] = useState(false);
+  const { t } = useI18n();
 
   const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
 
@@ -31,10 +33,10 @@ export function GlobalLogNewData() {
         type="button"
         className="log-fab primary"
         onClick={() => setOpen(true)}
-        aria-label="Log new health data"
+        aria-label={t("log.newDataAria")}
       >
         <Plus size={18} aria-hidden="true" />
-        <span className="log-fab-label">Log data</span>
+        <span className="log-fab-label">{t("log.fab")}</span>
       </button>
 
       {open && (
@@ -42,26 +44,26 @@ export function GlobalLogNewData() {
           className="log-panel-overlay"
           role="dialog"
           aria-modal="true"
-          aria-label="Log new data"
+          aria-label={t("log.newDataDialog")}
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) setOpen(false);
           }}
         >
           <div className="log-panel" onMouseDown={(event) => event.stopPropagation()}>
             <Card
-              title="Log New Data"
+              title={t("log.title")}
               action={
                 <button
                   type="button"
                   className="icon-button"
                   onClick={() => setOpen(false)}
-                  aria-label="Close log form"
+                  aria-label={t("log.closeForm")}
                 >
                   <X size={18} aria-hidden="true" />
                 </button>
               }
             >
-              <p className="log-panel-meta">Quick glucose entry for {today}. Date and time are recorded automatically.</p>
+              <p className="log-panel-meta">{t("log.meta").replace("today", today)}</p>
               <LogNewDataForm onSuccess={() => setOpen(false)} />
             </Card>
           </div>

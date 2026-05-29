@@ -23,6 +23,7 @@ export type HealthLog = {
   activity_minutes?: number;
   notes?: string;
   created_at?: string;
+  reading_time?: string;
 };
 
 export type UserAccount = {
@@ -62,6 +63,7 @@ export type Profile = {
   heart_disease_history: boolean;
   difficulty_walking: boolean;
   family_history_diabetes: boolean;
+  forecast_personalization_enabled: boolean;
   fasting_glucose_optional?: number | null;
   hba1c_optional?: number | null;
   created_at: string;
@@ -101,12 +103,14 @@ export type GlucoseForecast = {
   horizon_minutes: number[];
   created_at?: string;
   calibration_applied?: boolean;
+  personalization_enabled?: boolean;
   personal_mae_per_horizon?: Record<string, number> | null;
   forecast_quality?: "learning" | "calibrated" | "needs_more_data" | string | null;
 };
 
 export type ForecastAccuracy = {
   user_id: number;
+  personalization_enabled?: boolean;
   total_evaluations: number;
   per_horizon: Record<string, { count: number; mae: number; bias: number }>;
   latest: Array<Record<string, unknown>>;
@@ -271,7 +275,7 @@ export const api = {
   getForecastAccuracy: (userId = 1) => request<ForecastAccuracy>(`/forecast/${userId}/accuracy`),
   triggerForecast: (userId = 1) => request<GlucoseForecast>(`/forecast/${userId}`, { method: "POST" }),
   assessRisk: (payload: Record<string, unknown>) => request<RiskAssessment>("/risk-assessment", { method: "POST", body: JSON.stringify(payload) }),
-  addLog: (payload: { user_id?: number; glucose_level: number; is_fasting: boolean }) => request<HealthLog>("/logs", { method: "POST", body: JSON.stringify(payload) }),
+  addLog: (payload: { user_id?: number; glucose_level: number; is_fasting: boolean; reading_time?: string }) => request<HealthLog>("/logs", { method: "POST", body: JSON.stringify(payload) }),
   assessMonitoring: (userId = 1) => request<MonitoringAssessment>(`/monitoring-assessment?user_id=${userId}`, { method: "POST" }),
   report: (type: string, userId = 1) => request<ReportDocument>(`/reports/${type}?user_id=${userId}`, { method: "POST" }),
   reports: (userId = 1) => request<ReportDocument[]>(`/reports/${userId}`),

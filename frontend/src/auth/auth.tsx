@@ -26,6 +26,12 @@ const DEMO_ACCOUNTS: StoredAccount[] = [
   { email: "demo-monitoring", userId: 1, fullName: "Sarah Kovac", onboardingComplete: true },
   { email: "demo-high-risk", userId: 2, fullName: "Milan Hadzic", onboardingComplete: true },
   { email: "demo-low-risk", userId: 3, fullName: "Lejla Moric", onboardingComplete: true },
+  { email: "demo-improving", userId: 101, fullName: "Hana Novak", onboardingComplete: true },
+  { email: "demo-high-variability", userId: 102, fullName: "Marko Jukic", onboardingComplete: true },
+  { email: "demo-hypo-watch", userId: 103, fullName: "Ema Horvat", onboardingComplete: true },
+  { email: "demo-night-shift", userId: 104, fullName: "Ivan Knezevic", onboardingComplete: true },
+  { email: "demo-weekend-spikes", userId: 105, fullName: "Petra Babic", onboardingComplete: true },
+  { email: "demo-stable", userId: 106, fullName: "Luka Kralj", onboardingComplete: true },
 ];
 
 function safeParseJson<T>(raw: string | null): T | null {

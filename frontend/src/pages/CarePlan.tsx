@@ -16,6 +16,7 @@ import {
 import { api } from "../api/client";
 import { useAuth } from "../auth/auth";
 import { Badge, EmptyState, ErrorState, LoadingState, PageHeader } from "../components/ui";
+import { useI18n } from "../i18n";
 
 function percent(value?: number) {
   return typeof value === "number" ? `${Math.round(value * 100)}%` : "-";
@@ -96,6 +97,8 @@ function renderMealText(item: string) {
 
 export function CarePlan() {
   const auth = useAuth();
+  const { language, t } = useI18n();
+  const bs = language === "bs";
   const userId = auth.session?.userId ?? 1;
   const queryClient = useQueryClient();
   const [isGenerating, setIsGenerating] = useState(false);
@@ -133,72 +136,69 @@ export function CarePlan() {
   return (
     <div className="page care-plan-page">
       <PageHeader
-        title="Care Plan"
-        subtitle="Generate a patient-specific meal plan from the latest glucose reading, RF model signals, Bayesian risk, and learned feedback."
-        meta={`Meal plan source: ${source}`}
+        title={t("carePlan.title")}
+        subtitle={t("carePlan.subtitle")}
+        meta={`${t("carePlan.metaSource")}: ${source}`}
       />
 
-      {plan.isError && <ErrorState title="Care plan is unavailable" body="Glyco could not generate the meal plan from the current patient data." />}
+      {plan.isError && <ErrorState title={t("carePlan.unavailableTitle")} body={t("carePlan.unavailableBody")} />}
 
       <section className="care-plan-hero">
         <div className="care-plan-hero-copy">
-          <span className="generator-kicker"><ChefHat size={16} /> Real meal plan generator</span>
-          <h2>{String(plan.data?.direction ?? "Generate a plan from the newest patient data")}</h2>
-          <p>
-            This screen calls the care-plan API and rebuilds the meal plan from current readings, risk assessment,
-            glucose trend, Bayesian posterior, and Thompson recommendation learning.
-          </p>
+          <span className="generator-kicker"><ChefHat size={16} /> {t("carePlan.generatorKicker")}</span>
+          <h2>{String(plan.data?.direction ?? t("carePlan.generatePrompt"))}</h2>
+          <p>{t("carePlan.description")}</p>
           <div className="care-plan-action-row">
             <button type="button" className="generate-plan-button" onClick={handleGenerate} disabled={isGenerating || plan.isFetching}>
               <RefreshCw size={18} className={(isGenerating || plan.isFetching) ? "spin-icon" : undefined} />
-              {(isGenerating || plan.isFetching) ? "Generating" : "Generate meal plan"}
+              {(isGenerating || plan.isFetching) ? t("carePlan.generating") : t("carePlan.generateButton")}
             </button>
             <Badge tone={plan.data?.source?.endsWith("-personalized") ? "good" : "warning"}>{source}</Badge>
-            <small><Clock3 size={14} /> Updated {generatedAt}</small>
+            <small><Clock3 size={14} /> {t("carePlan.updated")} {generatedAt}</small>
           </div>
         </div>
         <div className="care-plan-signal-board">
-          <div><span>Latest reading</span><strong>{latestReading}</strong><small>{readingKind(signals?.latest_is_fasting)}</small></div>
-          <div><span>RF risk</span><strong>{signals?.risk_level ?? "-"}</strong><small>{signals?.risk_model_version ?? "loading"}</small></div>
-          <div><span>Trend</span><strong>{signals?.trend_label ?? "-"}</strong><small>{signals?.trend_model_version ?? "loading"}</small></div>
-          <div><span>Bayesian risk</span><strong>{percent(signals?.bayesian_posterior)}</strong><small>posterior mean</small></div>
+          <div><span>{t("carePlan.latestReading")}</span><strong>{latestReading}</strong><small>{readingKind(signals?.latest_is_fasting)}</small></div>
+          <div><span>{t("carePlan.rfRisk")}</span><strong>{signals?.risk_level ?? "-"}</strong><small>{signals?.risk_model_version ?? (bs ? "učitavanje" : "loading")}</small></div>
+          <div><span>{t("carePlan.trend")}</span><strong>{signals?.trend_label ?? "-"}</strong><small>{signals?.trend_model_version ?? (bs ? "učitavanje" : "loading")}</small></div>
+          <div><span>{t("carePlan.bayesianRisk")}</span><strong>{percent(signals?.bayesian_posterior)}</strong><small>{t("carePlan.posteriorMean")}</small></div>
         </div>
       </section>
 
       {plan.isLoading ? (
-        <LoadingState label="Generating care plan from profile, logs, models, and learning memory" />
+        <LoadingState label={t("carePlan.updating")} />
       ) : (
         <>
           <section className="meal-plan-section">
             <div className="section-heading">
-              <span><Utensils size={16} /> Generated today</span>
-              <h2>Patient-specific meal plan</h2>
-              <p>These meals come from the current care-plan response, not a static frontend template.</p>
+              <span><Utensils size={16} /> {t("carePlan.generatedToday")}</span>
+              <h2>{t("carePlan.patientSpecificMealPlan")}</h2>
+              <p>{t("carePlan.mealsFromResponse")}</p>
             </div>
             {sample.length ? (
               <div className="meal-plan-grid">
                 {sample.map((item, index) => (
                   <article className="meal-plan-card" key={`${item}-${index}`}>
                     <div>
-                      <span>{mealLabels[index] ?? `Meal ${index + 1}`}</span>
+                      <span>{mealLabels[index] ?? `${bs ? "Obrok" : "Meal"} ${index + 1}`}</span>
                       <ChefHat size={20} />
                     </div>
                     {renderMealText(item)}
                   </article>
                 ))}
               </div>
-            ) : <EmptyState title="No meal plan yet" body="Generate a plan after the patient has at least one glucose reading." />}
+            ) : <EmptyState title={t("carePlan.noMealPlanTitle")} body={t("carePlan.noMealPlanBody")} />}
           </section>
 
           <div className="care-plan-grid">
             <section className="care-plan-panel">
-              <header><Apple size={20} /><h2>Prefer</h2></header>
+              <header><Apple size={20} /><h2>{t("carePlan.prefer")}</h2></header>
               <ul className="care-plan-list positive">
                 {prefer.map((item) => <li key={item}><CheckCircle2 size={17} />{item}</li>)}
               </ul>
             </section>
             <section className="care-plan-panel">
-              <header><XCircle size={20} /><h2>Limit</h2></header>
+              <header><XCircle size={20} /><h2>{t("carePlan.limit")}</h2></header>
               <ul className="care-plan-list caution">
                 {limit.map((item) => <li key={item}><XCircle size={17} />{item}</li>)}
               </ul>
@@ -206,7 +206,7 @@ export function CarePlan() {
           </div>
 
           <section className="care-plan-panel weekly-panel">
-            <header><CalendarDays size={20} /><h2>Weekly plan</h2></header>
+            <header><CalendarDays size={20} /><h2>{t("carePlan.weeklyPlan")}</h2></header>
             <div className="weekly-action-grid">
               {weekly.map((item, index) => (
                 <div key={`${item}-${index}`}><span>{String(index + 1).padStart(2, "0")}</span><p>{item}</p></div>
@@ -216,19 +216,19 @@ export function CarePlan() {
 
           <section className="care-plan-evidence">
             <div className="section-heading">
-              <span><Database size={16} /> Why this changed</span>
-              <h2>Live patient signals used</h2>
+              <span><Database size={16} /> {t("carePlan.whyThisChanged")}</span>
+              <h2>{t("carePlan.liveSignalsUsed")}</h2>
             </div>
             <div className="model-evidence-list">
-              <div><span>Reading type</span><strong>{readingKind(signals?.latest_is_fasting)}</strong><small>{latestReading}</small></div>
-              <div><span>Average fasting</span><strong>{signals?.avg_fasting ? `${signals.avg_fasting} mg/dL` : "-"}</strong><small>recent logs</small></div>
-              <div><span>Average post-meal</span><strong>{signals?.avg_post_meal ? `${signals.avg_post_meal} mg/dL` : "-"}</strong><small>recent logs</small></div>
-              <div><span>Learned focus</span><strong>{signals?.top_recommendation_type ?? "-"}</strong><small>Thompson ranker</small></div>
+              <div><span>{t("carePlan.readingType")}</span><strong>{readingKind(signals?.latest_is_fasting)}</strong><small>{latestReading}</small></div>
+              <div><span>{t("carePlan.avgFasting")}</span><strong>{signals?.avg_fasting ? `${signals.avg_fasting} mg/dL` : "-"}</strong><small>{bs ? "nedavni zapisi" : "recent logs"}</small></div>
+              <div><span>{t("carePlan.avgPostMeal")}</span><strong>{signals?.avg_post_meal ? `${signals.avg_post_meal} mg/dL` : "-"}</strong><small>{bs ? "nedavni zapisi" : "recent logs"}</small></div>
+              <div><span>{t("carePlan.learnedFocus")}</span><strong>{signals?.top_recommendation_type ?? "-"}</strong><small>{t("carePlan.thompsonRanker")}</small></div>
             </div>
-            <p className="care-plan-safety"><ShieldCheck size={16} /> This is supportive diabetes tracking guidance. It does not replace clinician nutrition advice or medication changes.</p>
+            <p className="care-plan-safety"><ShieldCheck size={16} /> {t("carePlan.safetyNote")}</p>
           </section>
 
-          {plan.isFetching && <div className="care-plan-refreshing"><Sparkles size={16} /> Updating meal plan from latest backend data...</div>}
+          {plan.isFetching && <div className="care-plan-refreshing"><Sparkles size={16} /> {t("carePlan.updating")}</div>}
         </>
       )}
     </div>

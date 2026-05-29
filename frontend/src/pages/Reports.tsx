@@ -4,6 +4,7 @@ import { api } from "../api/client";
 import type { ReportDocument } from "../api/client";
 import { useAuth } from "../auth/auth";
 import { ErrorState, LoadingState, PageHeader } from "../components/ui";
+import { useI18n } from "../i18n";
 
 const reportTypes = [
   {
@@ -193,6 +194,8 @@ function ReportPdfPreview({ report }: { report: ReportDocument }) {
 /* ─── Main page ───────────────────────────────────────────────────── */
 export function Reports() {
   const auth = useAuth();
+  const { language } = useI18n();
+  const bs = language === "bs";
   const userId = auth.session?.userId ?? 1;
   const queryClient = useQueryClient();
   const [previewReport, setPreviewReport] = useState<ReportDocument | null>(null);
@@ -223,14 +226,14 @@ export function Reports() {
   return (
     <div className="page reports-page">
       <PageHeader
-        title="Reports"
-        subtitle="Generate and manage clinical, family, and weekly health summaries."
+        title={bs ? "Izvještaji" : "Reports"}
+        subtitle={bs ? "Generišite i upravljajte kliničkim, porodičnim i sedmičnim zdravstvenim sažecima." : "Generate and manage clinical, family, and weekly health summaries."}
       />
 
       {create.isError && (
         <ErrorState
-          title="Report generation failed"
-          body="The backend did not return a report document."
+          title={bs ? "Generisanje izvještaja nije uspjelo" : "Report generation failed"}
+          body={bs ? "Backend nije vratio dokument izvještaja." : "The backend did not return a report document."}
         />
       )}
 
@@ -238,7 +241,7 @@ export function Reports() {
         {/* LEFT — Generator Panel */}
         <aside className="reports-generator">
           <div className="generator-header">
-            <span className="generator-label">Generate</span>
+            <span className="generator-label">{bs ? "Generiši" : "Generate"}</span>
           </div>
           <div className="generator-cards">
             {reportTypes.map((rt) => {
@@ -275,7 +278,7 @@ export function Reports() {
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
               </svg>
-              Could not load saved reports.
+              {bs ? "Nije moguće učitati sačuvane izvještaje." : "Could not load saved reports."}
             </div>
           )}
         </aside>
@@ -283,7 +286,7 @@ export function Reports() {
         {/* CENTER — PDF Preview */}
         <main className="reports-preview">
           <div className="preview-header">
-            <span className="generator-label">Latest Report</span>
+            <span className="generator-label">{bs ? "Najnoviji izvještaj" : "Latest Report"}</span>
             {latestReport?.id && (
               <a
                 className="preview-download"
@@ -295,14 +298,14 @@ export function Reports() {
                   <polyline points="7 10 12 15 17 10" />
                   <line x1="12" y1="15" x2="12" y2="3" />
                 </svg>
-                Download PDF
+                {bs ? "Preuzmi PDF" : "Download PDF"}
               </a>
             )}
           </div>
 
           {create.isPending ? (
             <div className="preview-empty">
-              <LoadingState label="Generating report…" />
+              <LoadingState label={bs ? "Generisanje izvještaja…" : "Generating report…"} />
             </div>
           ) : !latestReport ? (
             <div className="preview-empty">
@@ -315,8 +318,8 @@ export function Reports() {
                   <polyline points="10 9 9 9 8 9" />
                 </svg>
               </div>
-              <strong>No report yet</strong>
-              <p>Generate a doctor, family, or weekly summary to preview it here.</p>
+              <strong>{bs ? "Još nema izvještaja" : "No report yet"}</strong>
+              <p>{bs ? "Generišite ljekarski, porodični ili sedmični sažetak da biste ga pregledali ovdje." : "Generate a doctor, family, or weekly summary to preview it here."}</p>
             </div>
           ) : latestPdfUrl ? (
             <div className="pdf-viewer">
@@ -333,7 +336,7 @@ export function Reports() {
         {/* RIGHT — Archive */}
         <aside className="reports-archive">
           <div className="archive-header">
-            <span className="generator-label">Archive</span>
+            <span className="generator-label">{bs ? "Arhiva" : "Archive"}</span>
             <span className="archive-count">{allReports.length}</span>
           </div>
 
@@ -344,7 +347,7 @@ export function Reports() {
                 className={`archive-filter${activeArchiveType === f ? " active" : ""}`}
                 onClick={() => setActiveArchiveType(f)}
               >
-                {f === "all" ? "All" : f[0].toUpperCase() + f.slice(1)}
+                {f === "all" ? (bs ? "Sve" : "All") : (bs ? (f === "doctor" ? "Doktor" : f === "family" ? "Porodični" : "Sedmični") : f[0].toUpperCase() + f.slice(1))}
               </button>
             ))}
           </div>
@@ -353,7 +356,7 @@ export function Reports() {
             {reports.isLoading ? (
               <LoadingState label="Loading archive…" />
             ) : filteredArchive.length === 0 ? (
-              <div className="archive-empty">No {activeArchiveType === "all" ? "" : activeArchiveType + " "}reports yet.</div>
+              <div className="archive-empty">{bs ? `Još nema ${activeArchiveType === "all" ? "izvještaja" : activeArchiveType === "doctor" ? "doktor izvještaja" : activeArchiveType === "family" ? "porodičnih izvještaja" : "sedmičnih izvještaja"}.` : `No ${activeArchiveType === "all" ? "" : activeArchiveType + " "}reports yet.`}</div>
             ) : (
               filteredArchive.map((report, index) => (
                 <button

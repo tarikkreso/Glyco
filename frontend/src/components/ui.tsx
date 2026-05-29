@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { useI18n } from "../i18n";
 
 type ToastTone = "success" | "error";
 
@@ -22,6 +23,7 @@ const ToastContext = createContext<((toast: ToastInput) => void) | null>(null);
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toast, setToast] = useState<ToastState | null>(null);
   const timeoutHandle = useRef<number | null>(null);
+  const { t } = useI18n();
 
   const dismiss = useCallback(() => {
     setToast(null);
@@ -60,7 +62,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             type="button"
             className={`toast toast-${toast.tone}`}
             onClick={dismiss}
-            aria-label="Dismiss message"
+            aria-label={t("common.dismiss")}
           >
             <strong>{toast.title}</strong>
             {toast.body && <p>{toast.body}</p>}
@@ -110,5 +112,6 @@ export function SuccessState({ title, body }: { title: string; body: string }) {
 }
 
 export function LoadingState({ label = "Loading" }: { label?: string }) {
-  return <div className="loading-state" aria-live="polite"><span className="loading-dot" />{label}</div>;
+  const { t } = useI18n();
+  return <div className="loading-state" aria-live="polite"><span className="loading-dot" />{label === "Loading" ? t("common.loading") : label}</div>;
 }

@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Brain, ClipboardList, LineChart, ShieldCheck, Target, TrendingUp } from "lucide-react";
 import { useMemo } from "react";
+import { useI18n } from "../i18n";
 import { useNavigate, useParams } from "react-router-dom";
 import { api } from "../api/client";
 import { useAuth } from "../auth/auth";
@@ -49,12 +50,15 @@ function formatPercent(value?: number) {
 }
 
 export function MetricDetail() {
+  const { t } = useI18n();
   const auth = useAuth();
   const userId = auth.session?.userId ?? 1;
   const navigate = useNavigate();
   const { metricId = "glucose" } = useParams();
   const copy = metricCopy[metricId] ?? metricCopy.glucose;
   const Icon = copy.icon;
+  const title = t(`metric.${metricId}.title`);
+  const plain = t(`metric.${metricId}.plain`);
   const logs = useQuery({ queryKey: ["logs", userId], queryFn: () => api.logs(userId) });
   const risk = useQuery({ queryKey: ["risk", userId], queryFn: () => api.latestRisk(userId) });
   const monitoring = useQuery({ queryKey: ["monitoring", userId], queryFn: () => api.latestMonitoring(userId) });
@@ -78,36 +82,36 @@ export function MetricDetail() {
 
   return (
     <div className="page metric-detail-page">
-      <button className="secondary back-button" type="button" onClick={() => navigate("/overview")}><ArrowLeft size={16} /> Back to overview</button>
-      <PageHeader title={copy.title} subtitle={copy.plain} meta="Patient-friendly explanation" />
+      <button className="secondary back-button" type="button" onClick={() => navigate("/overview")}><ArrowLeft size={16} /> {t("common.backToOverview")}</button>
+      <PageHeader title={title} subtitle={plain} meta={t("metric.meta")} />
       <section className="metric-detail-hero">
         <div className="metric-detail-icon"><Icon size={28} /></div>
         <div>
-          <span>Current signal</span>
+          <span>{t("metric.currentSignal")}</span>
           <strong>{primaryValue}</strong>
-          <p>{metricId === "thompson" ? thompsonAction?.body : monitoring.data?.summary.message ?? "Glyco will explain this as more readings arrive."}</p>
+          <p>{metricId === "thompson" ? thompsonAction?.body : monitoring.data?.summary.message ?? t("metric.noExplanation")}</p>
         </div>
       </section>
       <div className="metric-detail-grid">
-        <Card title="Why this matters">
+        <Card title={t("metric.whyTitle")}>
           <ul className="explain-list">
-            <li>Glyco looks for patterns across logs, model output, and feedback, not just one isolated value.</li>
-            <li>The {trendSource} describes the recent reading pattern as <strong>{monitoring.data?.trend_label ?? "unknown"}</strong>.</li>
-            <li>The {riskSource} currently estimates <strong>{risk.data?.risk_level ?? "unknown"}</strong> risk.</li>
+            <li>{t("metric.whyA")}</li>
+            <li>{t("metric.whyB")} {t(trendSource === "trained glucose trend model" ? "metric.trendModel" : "metric.trendModel")} {t("metric.whyPattern")} <strong>{monitoring.data?.trend_label ?? t("common.unknown")}</strong>.</li>
+            <li>{t("metric.whyC")} {t(riskSource === "trained RF risk model" ? "metric.rfRiskModel" : "metric.rfRiskModel")} {t("metric.whyRisk")} <strong>{risk.data?.risk_level ?? t("common.unknown")}</strong>.</li>
           </ul>
         </Card>
-        <Card title="What Glyco uses">
+        <Card title={t("metric.whatUses")}>
           <div className="model-evidence-list">
-            <div><span>Recent average</span><strong>{average ? `${average} mg/dL` : "-"}</strong></div>
-            <div><span>RF risk model</span><strong>{risk.data?.model_version ?? "Loading"}</strong></div>
-            <div><span>Trend model</span><strong>{monitoring.data?.model_version ?? "Loading"}</strong></div>
-            <div><span>Bayesian posterior</span><strong>{formatPercent(bayesian.data?.posterior_mean)}</strong></div>
+            <div><span>{t("metric.recentAverage")}</span><strong>{average ? `${average} mg/dL` : "-"}</strong></div>
+            <div><span>{t("metric.rfRiskModel")}</span><strong>{risk.data?.model_version ?? t("common.loading")}</strong></div>
+            <div><span>{t("metric.trendModel")}</span><strong>{monitoring.data?.model_version ?? t("common.loading")}</strong></div>
+            <div><span>{t("metric.bayesianPosterior")}</span><strong>{formatPercent(bayesian.data?.posterior_mean)}</strong></div>
           </div>
         </Card>
-        <Card title="Next useful action" action={<Badge>{thompsonAction?.type ?? "monitoring"}</Badge>}>
-          {insight.isLoading ? <LoadingState label="Loading action" /> : thompsonAction ? (
+        <Card title={t("metric.nextActionTitle")} action={<Badge>{thompsonAction?.type ?? t("metric.monitoring")}</Badge>}>
+          {insight.isLoading ? <LoadingState label={t("metric.loadingAction")} /> : thompsonAction ? (
             <p><strong>{thompsonAction.title}.</strong> {thompsonAction.body}</p>
-          ) : <EmptyState title="No learned action yet" body="Ask Glyco a question and save feedback to personalize future actions." />}
+          ) : <EmptyState title={t("metric.noLearnedActionTitle")} body={t("metric.noLearnedActionBody")} />}
         </Card>
       </div>
     </div>

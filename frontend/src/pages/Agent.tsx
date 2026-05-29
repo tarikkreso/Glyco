@@ -5,14 +5,8 @@ import { useMemo, useState, useRef, useEffect } from "react";
 import { api, type AgentChatResponse } from "../api/client";
 import { useAuth } from "../auth/auth";
 import { Badge, Card, EmptyState, ErrorState, LoadingState, PageHeader } from "../components/ui";
+import { useI18n } from "../i18n";
 import { appendAgentAssistantMessage, appendAgentUserMessage, resetAgentConversation, setAgentDraft, useAgentChatSession } from "../state/agentChatSession";
-
-const quickPrompts = [
-  "Should I be worried this week?",
-  "What changed in my recent readings?",
-  "What should I ask my doctor?",
-  "How can my family help this week?",
-];
 
 function InlineFormatted({ text }: { text: string }) {
   const parts = text.split(/(\*\*[^*]+\*\*)/g);
@@ -50,7 +44,7 @@ function FormattedResponse({ content }: { content: string }) {
     }
     if (/^#{1,4}\s+/.test(line)) {
       blocks.push(<h3 key={index}><InlineFormatted text={line.replace(/^#{1,4}\s+/, "")} /></h3>);
-    } else if (/^(Bottom line|What I see|Why it matters|What to do this week|Questions for the doctor|Safety note|How family can help)$/i.test(line)) {
+    } else if (/^(Bottom line|What I see|Why it matters|What to do this week|Questions for the doctor|Safety note|How family can help|Zaključak|Analiza stanja|Zašto je to važno|Šta učiniti ove sedmice|Pitanja za doktora|Sigurnosna napomena|Kako porodica može pomoći)$/i.test(line)) {
       blocks.push(<h3 key={index}><InlineFormatted text={line} /></h3>);
     } else if (/^[-*]\s+/.test(line)) {
       const items: string[] = [];
@@ -78,6 +72,7 @@ function FormattedResponse({ content }: { content: string }) {
 
 export function Agent() {
   const auth = useAuth();
+  const { t, language } = useI18n();
   const userId = auth.session?.userId ?? 1;
   const chatSession = useAgentChatSession();
   const [feedbackTone, setFeedbackTone] = useState("concise");
@@ -89,7 +84,13 @@ export function Agent() {
   const alerts = useQuery({ queryKey: ["alerts", userId], queryFn: () => api.alerts(userId) });
   const latestResponse = useMemo(() => [...chatSession.messages].reverse().find((item) => item.response)?.response, [chatSession.messages]);
   const chatHistory = useMemo(() => chatSession.messages.filter((message) => message.role === "user"), [chatSession.messages]);
-  const llmLabel = latestResponse ? `${latestResponse.llm_mode}: ${latestResponse.llm_model}` : "fallback";
+  const quickPrompts = useMemo(() => [
+    t("agent.promptWorried"),
+    t("agent.promptChanged"),
+    t("agent.promptDoctor"),
+    t("agent.promptFamily"),
+  ], [t]);
+  const llmLabel = latestResponse ? `${latestResponse.llm_mode}: ${latestResponse.llm_model}` : t("agent.fallback");
   const learning = latestResponse?.learning_summary;
   const chat = useMutation({
     mutationFn: (message: string) => api.agentChat(message, userId),
@@ -97,7 +98,7 @@ export function Agent() {
       appendAgentAssistantMessage(response.answer, response);
     },
     onError: () => {
-      appendAgentAssistantMessage("I could not reach the agent service. Try again after the API is available.");
+      appendAgentAssistantMessage(t("agent.apiUnavailable"));
     },
   });
   const feedback = useMutation({
@@ -110,7 +111,7 @@ export function Agent() {
       notes: helpful ? "User confirmed this answer style was useful." : "User wants a different style next time.",
     }),
     onSuccess: () => {
-      appendAgentAssistantMessage("Feedback saved. Glyco will use it to personalize the next answer.");
+      appendAgentAssistantMessage(t("agent.feedbackSaved"));
     },
   });
   const resetMemory = useMutation({
@@ -140,18 +141,18 @@ export function Agent() {
   };
   return (
     <div className="page agent-page frosty-agent-page">
-      <PageHeader title="Glyco Chat" subtitle="Ask natural-language questions while Glyco runs the active risk scorer, monitoring scorer, Bayesian layer, and adaptive recommendation ranker." meta={`Mode: ${llmLabel}`} />
+      <PageHeader title={t("agent.title")} subtitle={t("agent.subtitle")} meta={`Mode: ${llmLabel}`} />
       <div className="agent-layout">
-        <Card title="Glyco Agent" action={<div className="agent-card-actions"><button type="button" className="secondary history-toggle" onClick={() => setHistoryOpen((value) => !value)}><History size={15} /> History</button><Badge>{llmLabel}</Badge></div>}>
+        <Card title={t("agent.card")} action={<div className="agent-card-actions"><button type="button" className="secondary history-toggle" onClick={() => setHistoryOpen((value) => !value)}><History size={15} /> {t("agent.history")}</button><Badge>{llmLabel}</Badge></div>}>
           <div className="agent-ambient-mark" aria-hidden="true">
             <Sparkles size={18} />
-            <span>Frosted AI workspace</span>
+            <span>{t("agent.workspace")}</span>
           </div>
           {historyOpen && (
             <div className="chat-history-panel">
               <header>
-                <strong>Chat history</strong>
-                <button type="button" className="icon-button" onClick={() => resetMemory.mutate()} disabled={resetMemory.isPending} aria-label="Start a new chat"><RotateCcw size={15} /></button>
+                <strong>{t("agent.historyTitle")}</strong>
+                <button type="button" className="icon-button" onClick={() => resetMemory.mutate()} disabled={resetMemory.isPending} aria-label={t("agent.aria.startNewChat")}><RotateCcw size={15} /></button>
               </header>
               {chatHistory.length ? (
                 <div className="chat-history-list">
@@ -162,7 +163,7 @@ export function Agent() {
                     </button>
                   ))}
                 </div>
-              ) : <EmptyState title="No past chats yet" body="Ask Glyco a question and it will appear here." />}
+              ) : <EmptyState title={t("agent.noPastChats")} body={t("agent.noPastChatsBody")} />}
             </div>
           )}
           <div className="prompt-row">
@@ -171,66 +172,66 @@ export function Agent() {
           <div ref={chatThreadRef} className="chat-thread" aria-live="polite">
             {chatSession.messages.map((message, index) => (
               <article className={`chat-message ${message.role}`} key={`${message.role}-${index}`}>
-                <span>{message.role === "assistant" ? "Glyco" : "You"}</span>
+                <span>{message.role === "assistant" ? "Glyco" : t("agent.you")}</span>
                 {message.role === "assistant" ? <FormattedResponse content={message.content} /> : <p>{message.content}</p>}
               </article>
             ))}
-            {chat.isPending && <LoadingState label="Glyco is checking profile, logs, models, and guidance" />}
-            {chat.isError && <ErrorState title="Agent could not answer" body="The chat request failed. Check the API connection and try again." />}
+            {chat.isPending && <LoadingState label={t("agent.loading")} />}
+            {chat.isError && <ErrorState title={t("agent.errorTitle")} body={t("agent.errorBody")} />}
           </div>
           <form className="chat-compose" onSubmit={(event) => { event.preventDefault(); submit(); }}>
-            <input value={chatSession.draft} onChange={(event) => setAgentDraft(event.target.value)} placeholder="Ask Glyco about this week..." aria-label="Ask Glyco" />
-            <button className="primary" type="submit" aria-label="Send message"><ArrowUp size={16} /></button>
+            <input value={chatSession.draft} onChange={(event) => setAgentDraft(event.target.value)} placeholder={t("agent.placeholder")} aria-label={t("agent.aria.ask")} />
+            <button className="primary" type="submit" aria-label={t("agent.aria.send")}><ArrowUp size={16} /></button>
           </form>
           {latestResponse && (
             <div className="feedback-panel">
               <div>
-                <strong>Teach Glyco</strong>
-                <p>Save feedback so the next answer adapts its tone and remembers confirmed actions.</p>
+                <strong>{t("agent.teach")}</strong>
+                <p>{t("agent.teachBody")}</p>
               </div>
-              <select value={feedbackTone} onChange={(event) => setFeedbackTone(event.target.value)} aria-label="Preferred answer tone">
-                <option value="concise">Concise</option>
-                <option value="detailed">Detailed</option>
-                <option value="family-friendly">Family friendly</option>
+              <select value={feedbackTone} onChange={(event) => setFeedbackTone(event.target.value)} aria-label={t("agent.aria.preferredTone")}>
+                <option value="concise">{t("agent.concise")}</option>
+                <option value="detailed">{t("agent.detailed")}</option>
+                <option value="family-friendly">{t("agent.familyFriendly")}</option>
               </select>
-              <button className="secondary" type="button" disabled={feedback.isPending} onClick={() => feedback.mutate(true)}>Useful</button>
-              <button className="secondary" type="button" disabled={feedback.isPending} onClick={() => feedback.mutate(false)}>Needs work</button>
+              <button className="secondary" type="button" disabled={feedback.isPending} onClick={() => feedback.mutate(true)}>{t("agent.useful")}</button>
+              <button className="secondary" type="button" disabled={feedback.isPending} onClick={() => feedback.mutate(false)}>{t("agent.needsWork")}</button>
             </div>
           )}
         </Card>
         <div className="agent-side">
-          <Card title="Agent Memory" action={<Badge>{learning?.feedback_count ?? 0} signals</Badge>}>
+          <Card title={t("agent.memory")} action={<Badge>{learning?.feedback_count ?? 0} {t("agent.signals")}</Badge>}>
             {learning ? (
               <div className="memory-stack">
-                <div><span>Preferred tone</span><strong>{learning.preferred_tone}</strong></div>
-                <div><span>Learned focus</span><strong>{learning.preferred_action_type ?? "monitoring"}</strong></div>
-                <div><span>Glucose pattern</span><strong>{learning.recent_glucose_pattern?.label ?? "new"}</strong></div>
-                <div><span>Helpfulness</span><strong>{learning.helpful_rate === null ? "new" : `${Math.round(learning.helpful_rate * 100)}%`}</strong></div>
+                <div><span>{t("agent.preferredTone")}</span><strong>{learning.preferred_tone}</strong></div>
+                <div><span>{t("agent.learnedFocus")}</span><strong>{learning.preferred_action_type ?? "monitoring"}</strong></div>
+                <div><span>{t("agent.glucosePattern")}</span><strong>{learning.recent_glucose_pattern?.label ?? "new"}</strong></div>
+                <div><span>{t("agent.helpfulness")}</span><strong>{learning.helpful_rate === null ? "new" : `${Math.round(learning.helpful_rate * 100)}%`}</strong></div>
                 <p>{learning.adaptation_note}</p>
-                {learning.next_best_action && <small>Next: {learning.next_best_action.title}</small>}
-                {learning.confirmed_actions.length > 0 && <small>Remembered: {learning.confirmed_actions[0]}</small>}
+                {learning.next_best_action && <small>{t("agent.next")}: {learning.next_best_action.title}</small>}
+                {learning.confirmed_actions.length > 0 && <small>{t("agent.remembered")}: {learning.confirmed_actions[0]}</small>}
               </div>
-            ) : <EmptyState title="No memory yet" body="Ask a question and save feedback to activate personalization." />}
+            ) : <EmptyState title={t("agent.noMemory")} body={t("agent.noMemoryBody")} />}
           </Card>
-          <Card title="Used Data" action={<Database size={18} />}>
+          <Card title={t("agent.usedData")} action={<Database size={18} />}>
             <div className="data-stack">
-              <div><span>Risk model</span><strong>{risk.data?.risk_level ?? "-"}</strong><small>{risk.data?.model_version ?? "Loading"}</small></div>
-              <div><span>Trend model</span><strong>{monitoring.data?.trend_label ?? "-"}</strong><small>{monitoring.data?.model_version ?? "Loading"}</small></div>
-              <div><span>Recent logs</span><strong>{logs.data?.length ?? "-"}</strong><small>patient-entered readings</small></div>
+              <div><span>{t("agent.riskModel")}</span><strong>{risk.data?.risk_level ?? "-"}</strong><small>{risk.data?.model_version ?? t("common.loading")}</small></div>
+              <div><span>{t("agent.trendModel")}</span><strong>{monitoring.data?.trend_label ?? "-"}</strong><small>{monitoring.data?.model_version ?? t("common.loading")}</small></div>
+              <div><span>{t("agent.recentLogs")}</span><strong>{logs.data?.length ?? "-"}</strong><small>{t("agent.patientReadings")}</small></div>
             </div>
           </Card>
-          <Card title="Guidance Grounding" action={<ClipboardList size={18} />}>
+          <Card title={t("agent.guidance")} action={<ClipboardList size={18} />}>
             {latestResponse?.guideline_snippets.length ? (
               <div className="guideline-list">
                 {latestResponse.guideline_snippets.map((snippet) => <div key={snippet.id}><strong>{snippet.category}</strong><p>{snippet.text}</p></div>)}
               </div>
-            ) : <EmptyState title="No snippets used yet" body="Ask a question to see the curated guidance notes the agent used." />}
+            ) : <EmptyState title={t("agent.noSnippets")} body={t("agent.noSnippetsBody")} />}
           </Card>
-          <Card title="Safety Boundary" action={<ShieldCheck size={18} />}>
-            <p>{latestResponse?.safety_note ?? "Glyco can support interpretation and preparation, but it does not diagnose or replace a clinician."}</p>
+          <Card title={t("agent.safety")} action={<ShieldCheck size={18} />}>
+            <p>{latestResponse?.safety_note ?? t("agent.defaultSafety")}</p>
           </Card>
-          <Card title="Proactive Alerts">
-            {(alerts.data ?? []).length ? <div className="alert-list">{alerts.data?.slice(0, 3).map((alert) => <div key={alert.id} className={alert.severity === "danger" ? "danger" : "warning"}><strong>{alert.title}</strong><span>{alert.message}</span></div>)}</div> : <EmptyState title="No active alerts" body="Glyco creates alerts after new logs when a watch or concerning pattern is detected." />}
+          <Card title={t("agent.proactive")}>
+            {(alerts.data ?? []).length ? <div className="alert-list">{alerts.data?.slice(0, 3).map((alert) => <div key={alert.id} className={alert.severity === "danger" ? "danger" : "warning"}><strong>{alert.title}</strong><span>{alert.message}</span></div>)}</div> : <EmptyState title={t("agent.noActiveAlerts")} body={t("agent.noActiveAlertsBody")} />}
           </Card>
         </div>
       </div>
