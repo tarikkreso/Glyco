@@ -297,6 +297,43 @@ export function Overview() {
     bs,
     formatGlucose: (value) => formatGlucoseFromMgdl(value, unit),
   });
+  const evidenceItems = [
+    {
+      label: bs ? "Glukoza" : "Glucose",
+      value: formatGlucoseFromMgdl(latestLog?.glucose_level, unit),
+      detail: previousAverage ? `${bs ? "Nedavni prosjek" : "Recent avg"} ${formatGlucoseFromMgdl(previousAverage, unit)}` : (bs ? "Ceka se historija" : "Waiting for history"),
+      tone: latestLog?.glucose_level && latestLog.glucose_level >= 180 ? "danger" : latestLog?.glucose_level && latestLog.glucose_level >= 140 ? "warning" : "good",
+      target: "glucose",
+    },
+    {
+      label: bs ? "Trend model" : "Trend model",
+      value: monitoring.data?.trend_label ?? (bs ? "Ucitavanje" : "Loading"),
+      detail: monitoring.data?.model_version ?? (bs ? "Nema verzije" : "No version yet"),
+      tone: monitoring.data?.trend_label === "concerning" ? "danger" : monitoring.data?.trend_label === "watch" ? "warning" : "good",
+      target: "monitoring",
+    },
+    {
+      label: bs ? "Risk model" : "Risk model",
+      value: risk.data?.risk_level ?? (bs ? "Ucitavanje" : "Loading"),
+      detail: risk.data?.model_version ?? (bs ? "Nema verzije" : "No version yet"),
+      tone: risk.data?.risk_level === "high" ? "danger" : risk.data?.risk_level === "medium" ? "warning" : "good",
+      target: "risk",
+    },
+    {
+      label: bs ? "Prognoza" : "Forecast",
+      value: forecast.data?.trend_direction ?? (bs ? "Ucenje" : "Learning"),
+      detail: forecast.data ? `60 min ${formatGlucoseFromMgdl(forecast.data.predictions["60"] * 18.015, unit)}` : (bs ? "Dodajte vise ocitanja" : "Add more readings"),
+      tone: forecast.data?.predicted_high_alert ? "warning" : forecast.data?.predicted_low_alert ? "danger" : "good",
+      target: "monitoring",
+    },
+    {
+      label: bs ? "Sljedeca akcija" : "Next action",
+      value: usefulInsight.action,
+      detail: thompsonAction ? (bs ? "Personalizirano rangiranje" : "Personalized ranking") : (bs ? "Zadane smjernice" : "Default guidance"),
+      tone: "neutral",
+      target: "agent",
+    },
+  ];
 
   const chat = useMutation({
     mutationFn: (message: string) => api.agentChat(message, userId),
@@ -440,6 +477,32 @@ export function Overview() {
           <div className="insight-adaptation-note">
             <span>{usefulInsight.source}</span>
             <small>{usefulInsight.adaptation}</small>
+          </div>
+        </div>
+
+        <div className="overview-evidence-panel">
+          <div className="overview-evidence-heading">
+            <span>{bs ? "Zasto Glyco to kaze" : "Why Glyco says this"}</span>
+            <strong>{bs ? "Pet signala u jednoj odluci" : "Five signals behind one recommendation"}</strong>
+          </div>
+          <div className="overview-evidence-grid">
+            {evidenceItems.map((item) => (
+              <button
+                type="button"
+                key={item.label}
+                className={`overview-evidence-card tone-${item.tone}`}
+                onClick={() => {
+                  if (item.target === "risk") setRiskModalOpen(true);
+                  else if (item.target === "monitoring") navigate("/monitoring");
+                  else if (item.target === "agent") navigate("/agent");
+                  else navigate("/metric/glucose");
+                }}
+              >
+                <span>{item.label}</span>
+                <strong>{item.value}</strong>
+                <small>{item.detail}</small>
+              </button>
+            ))}
           </div>
         </div>
       </section>

@@ -79,8 +79,21 @@ export function useToast() {
   return ctx;
 }
 
-export function PageHeader({ title, subtitle, meta }: { title: string; subtitle: string; meta?: string }) {
-  return <div className="page-header"><div><h1>{title}</h1><p>{subtitle}</p></div>{meta && <span className="meta">{meta}</span>}</div>;
+export function PageHeader({ title, subtitle, meta, action }: { title: string; subtitle: string; meta?: string; action?: ReactNode }) {
+  return (
+    <div className="page-header">
+      <div>
+        <h1>{title}</h1>
+        <p>{subtitle}</p>
+      </div>
+      {(meta || action) && (
+        <div className="page-header-actions">
+          {meta && <span className="meta">{meta}</span>}
+          {action}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function Card({ title, children, action }: { title?: string; children: ReactNode; action?: ReactNode }) {

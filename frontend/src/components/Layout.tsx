@@ -1,4 +1,4 @@
-import { Activity, BarChart3, FileText, Home, Menu, MessageSquareText, PanelLeftClose, PanelLeftOpen, Settings, Share2, Utensils } from "lucide-react";
+import { Activity, FileText, FlaskConical, Home, Menu, MessageSquareText, PanelLeftClose, PanelLeftOpen, Settings, Share2, Utensils } from "lucide-react";
 import { useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/auth";
@@ -8,6 +8,7 @@ import { useI18n } from "../i18n";
 
 const nav = [
   { to: "/overview", labelKey: "nav.overview", icon: Home },
+  { to: "/demo", labelKey: "nav.demo", icon: FlaskConical },
   { to: "/agent", labelKey: "nav.agent", icon: MessageSquareText },
   { to: "/monitoring", labelKey: "nav.monitoring", icon: Activity },
   { to: "/reports", labelKey: "nav.reports", icon: FileText },
@@ -29,7 +30,9 @@ export function Layout() {
       <div className={`shell ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
         <aside className="sidebar">
           <div className="brand-mark">
-            <div className="seal"><BarChart3 size={18} /></div>
+            <div className="seal">
+              <img src="/logo.png" alt="Glyco Logo" style={{ width: "24px", height: "24px", objectFit: "contain" }} />
+            </div>
             <div>
               <strong>Glyco</strong>
               <span>{t("app.clinicalCenter")}</span>
@@ -51,10 +54,9 @@ export function Layout() {
             })}
           </nav>
           <div className="sidebar-footer">
-            <span>{t("app.helpCenter")}</span>
             <button
               type="button"
-              className="link-button"
+              className="sidebar-logout-button"
               onClick={() => {
                 auth.logout();
                 navigate("/login", { replace: true });
@@ -68,6 +70,22 @@ export function Layout() {
           <header className="topbar">
               <div className="mobile-brand"><Menu size={18} /> Glyco</div>
             <div className="topbar-actions">
+              <label className="demo-switch">
+                <span>Demo</span>
+                <select
+                  value={auth.session?.email.startsWith("demo-") ? auth.session.email : ""}
+                  onChange={(event) => {
+                    if (!event.target.value) return;
+                    auth.switchDemoAccount(event.target.value);
+                    navigate("/overview");
+                  }}
+                >
+                  <option value="">Select patient</option>
+                  {auth.demoAccounts.map((demo) => (
+                    <option key={demo.email} value={demo.email}>{demo.fullName}</option>
+                  ))}
+                </select>
+              </label>
               <label className="language-switch">
                 <span>{t("app.language")}</span>
                 <select value={language} onChange={(event) => setLanguage(event.target.value as "en" | "bs")}>

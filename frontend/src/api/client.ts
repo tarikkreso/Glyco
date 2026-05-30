@@ -291,9 +291,16 @@ export const api = {
   assessRisk: (payload: Record<string, unknown>) => request<RiskAssessment>("/risk-assessment", { method: "POST", body: JSON.stringify(payload) }),
   addLog: (payload: { user_id?: number; glucose_level: number; is_fasting: boolean; reading_time?: string }) => request<HealthLog>("/logs", { method: "POST", body: JSON.stringify(payload) }),
   assessMonitoring: (userId = 1) => request<MonitoringAssessment>(`/monitoring-assessment?user_id=${userId}`, { method: "POST" }),
-  report: (type: string, userId = 1) => request<ReportDocument>(`/reports/${type}?user_id=${userId}`, { method: "POST" }),
+  report: (type: string, userId = 1, language: "en" | "bs" = "en") =>
+    request<ReportDocument>(`/reports/${type}?user_id=${userId}&language=${language}`, { method: "POST" }),
   reports: (userId = 1) => request<ReportDocument[]>(`/reports/${userId}`),
-  reportPdfUrl: (reportId: number, inline = false) => `${API_BASE}/reports/${reportId}/pdf${inline ? "?inline=1" : ""}`,
+  reportPdfUrl: (reportId: number, inline = false, language?: "en" | "bs") => {
+    const params = new URLSearchParams();
+    if (inline) params.set("inline", "1");
+    if (language) params.set("language", language);
+    const query = params.toString();
+    return `${API_BASE}/reports/${reportId}/pdf${query ? `?${query}` : ""}`;
+  },
   insight: (userId = 1) => request<GlycoInsight>(`/agent/insight/${userId}`),
   agentChat: (message: string, userId = 1) => request<AgentChatResponse>("/agent/chat", { method: "POST", body: JSON.stringify({ user_id: userId, message }) }),
   resetAgentMemory: (userId = 1) => request<{ status: string }>(`/agent/reset?user_id=${userId}`, { method: "POST" }),

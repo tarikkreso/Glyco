@@ -8,9 +8,20 @@ export type AuthSession = {
   onboardingComplete: boolean;
 };
 
+export type DemoAccount = {
+  email: string;
+  userId: number;
+  fullName: string;
+  onboardingComplete: boolean;
+  scenario: "stable" | "watch" | "concerning";
+  description: string;
+};
+
 type AuthContextValue = {
   session: AuthSession | null;
   isAuthenticated: boolean;
+  demoAccounts: DemoAccount[];
+  switchDemoAccount: (email: string) => void;
   register: (input: { email: string; password: string; fullName?: string; userId: number }) => { ok: true } | { ok: false; error: string };
   login: (input: { email: string; password: string }) => { ok: true } | { ok: false; error: string };
   logout: () => void;
@@ -22,16 +33,16 @@ const ACCOUNTS_KEY = "glyco_accounts_v1";
 
 type StoredAccount = { email: string; userId: number; fullName: string; onboardingComplete: boolean };
 
-const DEMO_ACCOUNTS: StoredAccount[] = [
-  { email: "demo-monitoring", userId: 1, fullName: "Sarah Kovac", onboardingComplete: true },
-  { email: "demo-high-risk", userId: 2, fullName: "Milan Hadzic", onboardingComplete: true },
-  { email: "demo-low-risk", userId: 3, fullName: "Lejla Moric", onboardingComplete: true },
-  { email: "demo-improving", userId: 101, fullName: "Hana Novak", onboardingComplete: true },
-  { email: "demo-high-variability", userId: 102, fullName: "Marko Jukic", onboardingComplete: true },
-  { email: "demo-hypo-watch", userId: 103, fullName: "Ema Horvat", onboardingComplete: true },
-  { email: "demo-night-shift", userId: 104, fullName: "Ivan Knezevic", onboardingComplete: true },
-  { email: "demo-weekend-spikes", userId: 105, fullName: "Petra Babic", onboardingComplete: true },
-  { email: "demo-stable", userId: 106, fullName: "Luka Kralj", onboardingComplete: true },
+const DEMO_ACCOUNTS: DemoAccount[] = [
+  { email: "demo-monitoring", userId: 1, fullName: "Sarah Kovac", onboardingComplete: true, scenario: "concerning", description: "Best judge demo: active risk, monitoring trend, forecast, alerts, agent context, and report handoff." },
+  { email: "demo-high-risk", userId: 2, fullName: "Milan Hadzic", onboardingComplete: true, scenario: "concerning", description: "High baseline risk profile for showing risk factors and doctor-ready summary." },
+  { email: "demo-low-risk", userId: 3, fullName: "Lejla Moric", onboardingComplete: true, scenario: "stable", description: "Low-risk contrast case for showing that Glyco does not over-alert." },
+  { email: "demo-improving", userId: 101, fullName: "Hana Novak", onboardingComplete: true, scenario: "stable", description: "Improving readings story for positive trend and routine reinforcement." },
+  { email: "demo-high-variability", userId: 102, fullName: "Marko Jukic", onboardingComplete: true, scenario: "watch", description: "Variable glucose pattern for anomaly explanation and monitoring guidance." },
+  { email: "demo-hypo-watch", userId: 103, fullName: "Ema Horvat", onboardingComplete: true, scenario: "watch", description: "Low-glucose watch case for forecast safety messaging." },
+  { email: "demo-night-shift", userId: 104, fullName: "Ivan Knezevic", onboardingComplete: true, scenario: "watch", description: "Lifestyle-context case for agent personalization and practical next steps." },
+  { email: "demo-weekend-spikes", userId: 105, fullName: "Petra Babic", onboardingComplete: true, scenario: "watch", description: "Post-meal/weekend spike story for Nutrition handoff." },
+  { email: "demo-stable", userId: 106, fullName: "Luka Kralj", onboardingComplete: true, scenario: "stable", description: "Stable monitoring case for calm baseline comparison." },
 ];
 
 function safeParseJson<T>(raw: string | null): T | null {
@@ -119,6 +130,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     persistSession(null);
   }, [persistSession]);
 
+  const switchDemoAccount = useCallback((email: string) => {
+    const account = DEMO_ACCOUNTS.find((item) => item.email === normalizeEmail(email));
+    if (!account) return;
+    persistSession({
+      userId: account.userId,
+      email: account.email,
+      fullName: account.fullName,
+      onboardingComplete: true,
+    });
+  }, [persistSession]);
+
   const updateSession = useCallback((patch: Partial<Pick<AuthSession, "email" | "fullName">>) => {
     if (!session) return;
     const updatedSession = { ...session, ...patch };
@@ -130,12 +152,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     () => ({
       session,
       isAuthenticated: !!session,
+      demoAccounts: DEMO_ACCOUNTS,
+      switchDemoAccount,
       register,
       login,
       logout,
       updateSession,
     }),
-    [login, logout, register, session, updateSession]
+    [login, logout, register, session, switchDemoAccount, updateSession]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

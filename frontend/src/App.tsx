@@ -11,6 +11,7 @@ import { Register } from "./pages/Register";
 import { Monitoring } from "./pages/Monitoring";
 import { Reports } from "./pages/Reports";
 import { CarePlan } from "./pages/CarePlan";
+import { CompetitionDemo } from "./pages/CompetitionDemo";
 import { FamilyView } from "./pages/FamilyView";
 import { MetricDetail } from "./pages/MetricDetail";
 
@@ -29,6 +30,7 @@ export default function App() {
         }
       >
         <Route path="/overview" element={<Overview />} />
+        <Route path="/demo" element={<CompetitionDemo />} />
         <Route path="/agent" element={<Agent />} />
         <Route path="/risk-check" element={<RiskCheck />} />
         <Route path="/profile" element={<ProfileSettings />} />
